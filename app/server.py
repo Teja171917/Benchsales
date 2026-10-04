@@ -160,6 +160,76 @@ def api_collect():
     return run()
 
 
+LIVE_SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow]  # dice: no public API
+
+
+@app.post("/api/jobs/live-search")
+def api_live_search(data: dict):
+    """Search the boards right now for a job title (+ optional location).
+
+    Returns listings without saving them; the frontend saves explicitly
+    via /api/jobs/save-live.
+    """
+    title = (data.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title is required")
+    location = (data.get("location") or "").strip()
+    settings = db.get_settings()
+    try:
+        enabled_sources = set(json.loads(settings.get("enabled_sources") or "[]"))
+    except json.JSONDecodeError:
+        enabled_sources = set(db.DEFAULT_ENABLED_SOURCES)
+    query = {"title": title, "location": location}
+    jobs: list[dict] = []
+    sources: dict = {}
+    for mod in LIVE_SOURCES:
+        name = mod.NAME
+        label = getattr(mod, "LABEL", name)
+        if name not in enabled_sources:
+            sources[name] = {"label": label, "status": "disabled in Settings", "count": 0}
+            continue
+        if not mod.enabled(settings):
+            sources[name] = {"label": label, "status": "needs API key — add it in Settings", "count": 0}
+            continue
+        try:
+            fetched = mod.fetch(query, settings)[:30]
+            for j in fetched:
+                j["temp_id"] = f"{name}:{j.get('source_id')}"
+            jobs.extend(fetched)
+            sources[name] = {"label": label, "status": "ok", "count": len(fetched)}
+        except Exception as e:  # noqa: BLE001 - one bad source shouldn't kill the search
+            sources[name] = {"label": label, "status": f"error: {e}", "count": 0}
+    # rank: jobs whose title covers more of the query words come first
+    words = title.lower().split()
+
+    def _relevance(job: dict):
+        t = (job.get("title") or "").lower()
+        c = (job.get("company") or "").lower()
+        hit_title = sum(1 for w in words if w in t)
+        hit_all = sum(1 for w in words if w in t or w in c)
+        return (hit_title / len(words), hit_all / len(words))
+
+    jobs.sort(key=_relevance, reverse=True)
+    return {"jobs": jobs, "sources": sources}
+
+
+@app.post("/api/jobs/save-live")
+def api_save_live(data: dict):
+    """Save live-search listings into the job board (dedupes) and re-run matching."""
+    jobs = data.get("jobs") or []
+    if not isinstance(jobs, list) or not jobs:
+        raise HTTPException(400, "jobs list is required")
+    saved, dupes = 0, 0
+    for j in jobs:
+        j.pop("temp_id", None)
+        if db.insert_job(j):
+            saved += 1
+        else:
+            dupes += 1
+    matches_new = matcher_mod.run_all()
+    return {"saved": saved, "duplicates": dupes, "matches_new": matches_new}
+
+
 # ---------- matches ----------
 @app.get("/api/matches")
 def api_list_matches(consultant_id: int = 0, min_score: float = 0):

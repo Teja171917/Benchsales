@@ -136,6 +136,14 @@ async function renderJobs() {
     <div class="row spread"><h2>Jobs</h2>
       <button class="btn primary" id="j-run">Run job collection</button></div>
     <div class="progress" id="j-prog"></div>
+    <div class="card"><h3>Live job search</h3>
+      <div class="muted" style="margin-bottom:8px">Type a job title — BenchPilot searches the boards right now and shows listings instantly.</div>
+      <div class="row">
+        <input type="text" id="j-live-title" placeholder="job title, e.g. AI test engineer" style="flex:2;min-width:220px">
+        <input type="text" id="j-live-loc" placeholder="location, e.g. Texas (optional)" style="flex:1;min-width:160px">
+        <button class="btn primary" id="j-live-go">Search live</button></div>
+      <div id="j-live-status" class="muted" style="margin-top:6px"></div>
+      <div id="j-live-results" style="margin-top:8px"></div></div>
     <div class="card"><h3>Import a posting URL</h3>
       <div class="muted" style="margin-bottom:8px">Paste any LinkedIn, Indeed, Dice or company posting link — BenchPilot fetches and parses it.</div>
       <div class="row"><input type="url" id="j-url" placeholder="https://…" style="flex:1;min-width:280px">
@@ -168,7 +176,64 @@ async function renderJobs() {
   $("#j-source").onchange = (e) => { jobsFilter.source = e.target.value; loadJobs(); };
   $("#j-search").onclick = () => { jobsFilter.q = $("#j-q").value; loadJobs(); };
   $("#j-q").onkeydown = (e) => { if (e.key === "Enter") $("#j-search").click(); };
+  /* live title search */
+  let liveResults = [];
+  const doLiveSearch = async () => {
+    const title = $("#j-live-title").value.trim();
+    const location = $("#j-live-loc").value.trim();
+    const st = $("#j-live-status"), box = $("#j-live-results");
+    if (!title) { st.textContent = "Type a job title first."; return; }
+    st.textContent = "Searching the boards… (10–30 seconds)";
+    box.innerHTML = "";
+    try {
+      const r = await api("/api/jobs/live-search",
+        {method: "POST", body: JSON.stringify({title, location})});
+      liveResults = r.jobs;
+      st.innerHTML = Object.values(r.sources)
+        .map((s) => `${esc(s.label)}: ${esc(s.status)}${s.count ? ` (${s.count})` : ""}`)
+        .join(" · ");
+      if (!liveResults.length) {
+        box.innerHTML = `<div class="muted">No listings found. Try a broader title — and add the free Adzuna API key in Settings for much wider coverage.</div>`;
+        return;
+      }
+      box.innerHTML = `
+        <div class="row spread" style="margin:8px 0"><b>${liveResults.length} listings</b>
+          <button class="btn primary" id="j-live-saveall">Save all to job board</button></div>
+        <div class="card" style="padding:0"><table class="jobs">
+          <tr><th>Title</th><th>Company</th><th>Location</th><th>Source</th><th></th></tr>
+          ${liveResults.map((j, i) => `<tr>
+            <td><b>${esc(j.title)}</b>${j.salary ? `<div class="muted">${esc(j.salary)}</div>` : ""}</td>
+            <td>${esc(j.company)}</td>
+            <td>${esc(j.location)}${j.remote_flag ? " (remote)" : ""}</td>
+            <td><span class="badge ${esc(j.source)}">${esc(j.source)}</span></td>
+            <td><div class="row">
+              ${j.url ? `<a class="btn" href="${esc(j.url)}" target="_blank" rel="noopener">view</a>` : ""}
+              <button class="btn" data-lsave="${i}">Save</button>
+            </div></td>
+          </tr>`).join("")}
+        </table></div>`;
+      $("#j-live-saveall").onclick = () => saveLive(liveResults, null);
+      $$("[data-lsave]", box).forEach((b) => b.onclick = (e) => {
+        saveLive([liveResults[Number(b.dataset.lsave)]], b);
+      });
+    } catch (e) { st.textContent = "error: " + e.message; }
+  };
+  $("#j-live-go").onclick = doLiveSearch;
+  $("#j-live-title").onkeydown = (e) => { if (e.key === "Enter") doLiveSearch(); };
+  $("#j-live-loc").onkeydown = (e) => { if (e.key === "Enter") doLiveSearch(); };
   loadJobs();
+}
+async function saveLive(jobs, btn) {
+  const r = await api("/api/jobs/save-live",
+    {method: "POST", body: JSON.stringify({jobs})});
+  if (btn) { btn.textContent = "Saved"; btn.disabled = true; }
+  $("#j-live-status").innerHTML =
+    `Saved <b>${r.saved}</b> new (${r.duplicates} duplicates skipped) → ` +
+    `<b>${r.matches_new}</b> new matches. <a href="#" id="j-gom">View matches</a>`;
+  const gom = $("#j-gom");
+  if (gom) gom.onclick = (e) => { e.preventDefault(); go("matches"); };
+  loadJobs();
+  return r;
 }
 async function loadJobs() {
   const el = $("#j-list");
