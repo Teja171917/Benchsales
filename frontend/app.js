@@ -129,7 +129,8 @@ function consultantModal(c) {
 }
 
 /* ================= JOBS ================= */
-let jobsFilter = {source: "", q: ""};
+let jobsFilter = {source: "", q: "", remote: false, location: "", emptype: "", posted: "", sort: "newest"};
+let jobsCache = [];
 async function renderJobs() {
   const el = $("#tab-jobs");
   el.innerHTML = `
@@ -149,10 +150,35 @@ async function renderJobs() {
       <div class="row"><input type="url" id="j-url" placeholder="https://…" style="flex:1;min-width:280px">
       <button class="btn" id="j-import">Import</button></div>
       <div id="j-importmsg" class="muted" style="margin-top:6px"></div></div>
-    <div class="card"><div class="row">
-      <select id="j-source"><option value="">All sources</option></select>
-      <input type="text" id="j-q" placeholder="search title/company…" value="${esc(jobsFilter.q)}">
-      <button class="btn" id="j-search">Search</button></div></div>
+    <div class="card"><div class="row spread" style="margin-bottom:12px"><h3 style="margin:0">Job board</h3>
+      <button class="btn" id="j-reset">Reset filters</button></div>
+      <div class="filters">
+        <div><label class="flabel" for="j-q">Keyword</label>
+          <input type="text" id="j-q" placeholder="title, company, skills…" value="${esc(jobsFilter.q)}"></div>
+        <div><label class="flabel" for="j-source">Source</label>
+          <select id="j-source"><option value="">All sources</option></select></div>
+        <div><label class="flabel" for="j-loc">Location</label>
+          <input type="text" id="j-loc" placeholder="city, state…" value="${esc(jobsFilter.location)}"></div>
+        <div><label class="flabel" for="j-emp">Employment type</label>
+          <select id="j-emp"><option value="">Any type</option></select></div>
+        <div><label class="flabel" for="j-posted">Posted</label>
+          <select id="j-posted">
+            <option value="">Any time</option>
+            <option value="1"${jobsFilter.posted === "1" ? " selected" : ""}>Last 24 hours</option>
+            <option value="7"${jobsFilter.posted === "7" ? " selected" : ""}>Last 7 days</option>
+            <option value="30"${jobsFilter.posted === "30" ? " selected" : ""}>Last 30 days</option>
+          </select></div>
+        <div><label class="flabel" for="j-sort">Sort by</label>
+          <select id="j-sort">
+            <option value="newest"${jobsFilter.sort === "newest" ? " selected" : ""}>Newest first</option>
+            <option value="oldest"${jobsFilter.sort === "oldest" ? " selected" : ""}>Oldest first</option>
+            <option value="title"${jobsFilter.sort === "title" ? " selected" : ""}>Title A–Z</option>
+            <option value="company"${jobsFilter.sort === "company" ? " selected" : ""}>Company A–Z</option>
+          </select></div>
+        <div><span class="flabel">Options</span>
+          <label class="fcheck"><input type="checkbox" id="j-remote"${jobsFilter.remote ? " checked" : ""}> Remote only</label></div>
+      </div></div>
+    <div id="j-count" class="muted" style="margin:0 2px 8px"></div>
     <div id="j-list"></div>`;
   $("#j-run").onclick = runCollection;
   $("#j-import").onclick = async () => {
@@ -169,13 +195,23 @@ async function renderJobs() {
       loadJobs();
     } catch (e) { msg.textContent = "error: " + e.message; }
   };
-  const srcs = await api("/api/sources/status");
-  $("#j-source").innerHTML = `<option value="">All sources</option>` +
-    srcs.filter((s) => s.name !== "urlimport")
-      .map((s) => `<option value="${s.name}"${jobsFilter.source === s.name ? " selected" : ""}>${esc(s.label)}</option>`).join("");
-  $("#j-source").onchange = (e) => { jobsFilter.source = e.target.value; loadJobs(); };
-  $("#j-search").onclick = () => { jobsFilter.q = $("#j-q").value; loadJobs(); };
-  $("#j-q").onkeydown = (e) => { if (e.key === "Enter") $("#j-search").click(); };
+  let jDeb = null;
+  const jLive = (fn) => (e) => { clearTimeout(jDeb); jDeb = setTimeout(() => fn(e.target.value), 250); };
+  $("#j-q").addEventListener("input", jLive((v) => { jobsFilter.q = v; applyJobFilters(); }));
+  $("#j-loc").addEventListener("input", jLive((v) => { jobsFilter.location = v; applyJobFilters(); }));
+  $("#j-source").onchange = (e) => { jobsFilter.source = e.target.value; applyJobFilters(); };
+  $("#j-emp").onchange = (e) => { jobsFilter.emptype = e.target.value; applyJobFilters(); };
+  $("#j-posted").onchange = (e) => { jobsFilter.posted = e.target.value; applyJobFilters(); };
+  $("#j-sort").onchange = (e) => { jobsFilter.sort = e.target.value; applyJobFilters(); };
+  $("#j-remote").onchange = (e) => { jobsFilter.remote = e.target.checked; applyJobFilters(); };
+  $("#j-reset").onclick = () => {
+    jobsFilter = {source: "", q: "", remote: false, location: "", emptype: "", posted: "", sort: "newest"};
+    $("#j-q").value = ""; $("#j-loc").value = "";
+    $("#j-source").value = ""; $("#j-emp").value = "";
+    $("#j-posted").value = ""; $("#j-sort").value = "newest";
+    $("#j-remote").checked = false;
+    applyJobFilters();
+  };
   /* live title search */
   let liveResults = [];
   const doLiveSearch = async () => {
@@ -238,18 +274,53 @@ async function saveLive(jobs, btn) {
 async function loadJobs() {
   const el = $("#j-list");
   el.innerHTML = `<span class="muted">Loading…</span>`;
-  const jobs = await api(`/api/jobs?source=${encodeURIComponent(jobsFilter.source)}&q=${encodeURIComponent(jobsFilter.q)}&limit=100`);
-  el.innerHTML = `<div class="card" style="padding:0"><table class="jobs">
+  jobsCache = await api("/api/jobs?limit=500");
+  const srcs = await api("/api/sources/status");
+  $("#j-source").innerHTML = `<option value="">All sources</option>` +
+    srcs.filter((s) => s.name !== "urlimport")
+      .map((s) => `<option value="${s.name}"${jobsFilter.source === s.name ? " selected" : ""}>${esc(s.label)}</option>`).join("");
+  const types = [...new Set(jobsCache.map((j) => (j.employment_type || "").trim()).filter(Boolean))].sort();
+  $("#j-emp").innerHTML = `<option value="">Any type</option>` +
+    types.map((t) => `<option${jobsFilter.emptype === t ? " selected" : ""}>${esc(t)}</option>`).join("");
+  applyJobFilters();
+}
+function jobMatches(j) {
+  const f = jobsFilter;
+  if (f.source && j.source !== f.source) return false;
+  if (f.remote && !j.remote_flag) return false;
+  if (f.emptype && (j.employment_type || "").trim() !== f.emptype) return false;
+  if (f.location && !(j.location || "").toLowerCase().includes(f.location.toLowerCase())) return false;
+  if (f.posted) {
+    if (!j.posted_at) return false;
+    const d = new Date(j.posted_at);
+    if (isNaN(d.getTime())) return false;
+    if (Date.now() - d.getTime() > Number(f.posted) * 864e5) return false;
+  }
+  if (f.q) {
+    const hay = `${j.title || ""} ${j.company || ""} ${j.description || ""}`.toLowerCase();
+    if (!f.q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w))) return false;
+  }
+  return true;
+}
+function applyJobFilters() {
+  const list = jobsCache.filter(jobMatches);
+  const ts = (j) => { const d = new Date(j.posted_at || 0); return isNaN(d.getTime()) ? 0 : d.getTime(); };
+  const s = jobsFilter.sort;
+  list.sort((a, b) => s === "title" ? (a.title || "").localeCompare(b.title || "")
+    : s === "company" ? (a.company || "").localeCompare(b.company || "")
+    : s === "oldest" ? ts(a) - ts(b) : ts(b) - ts(a));
+  const cnt = $("#j-count");
+  if (cnt) cnt.textContent = `Showing ${list.length} of ${jobsCache.length} jobs`;
+  $("#j-list").innerHTML = `<div class="card" style="padding:0"><table class="jobs">
     <tr><th>Title</th><th>Company</th><th>Location</th><th>Source</th><th>Posted</th><th></th></tr>
-    ${jobs.map((j) => `<tr>
+    ${list.map((j) => `<tr>
       <td><b>${esc(j.title)}</b>${j.salary ? `<div class="muted">${esc(j.salary)}</div>` : ""}</td>
       <td>${esc(j.company)}</td><td>${esc(j.location)}${j.remote_flag ? " (remote)" : ""}</td>
       <td><span class="badge ${esc(j.source)}">${esc(j.source)}</span></td>
       <td class="muted">${esc((j.posted_at || "").slice(0, 10))}</td>
       <td>${j.url ? `<a href="${esc(j.url)}" target="_blank" rel="noopener">view</a>` : ""}</td>
-    </tr>`).join("") || `<tr><td colspan="6" class="muted">No jobs yet — run a collection or import a URL.</td></tr>`}
-    </table></div>
-    <div class="muted">Showing ${jobs.length} jobs (newest first).</div>`;
+    </tr>`).join("") || `<tr><td colspan="6" class="muted">No jobs match these filters.</td></tr>`}
+    </table></div>`;
 }
 async function runCollection() {
   const prog = $("#j-prog");
@@ -264,22 +335,39 @@ async function runCollection() {
 }
 
 /* ================= MATCHES ================= */
-let matchFilter = {consultant_id: "", min_score: 0};
+let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best"};
 async function renderMatches() {
   const el = $("#tab-matches");
   el.innerHTML = `<div class="row spread"><h2>Matches</h2></div>
-    <div class="card"><div class="row">
-      <select id="mt-c"><option value="">All consultants</option></select>
-      <label class="muted">min score</label>
-      <input type="number" id="mt-s" min="0" max="100" value="${matchFilter.min_score}" style="width:70px">
-      <button class="btn" id="mt-go">Filter</button></div></div>
+    <div class="card"><div class="filters">
+      <div><label class="flabel" for="mt-c">Consultant</label>
+        <select id="mt-c"><option value="">All consultants</option></select></div>
+      <div><label class="flabel" for="mt-s">Min score</label>
+        <input type="number" id="mt-s" min="0" max="100" value="${matchFilter.min_score}"></div>
+      <div><label class="flabel" for="mt-src">Source</label>
+        <select id="mt-src"><option value="">All sources</option></select></div>
+      <div><label class="flabel" for="mt-sort">Sort by</label>
+        <select id="mt-sort">
+          <option value="best"${matchFilter.sort === "best" ? " selected" : ""}>Best score first</option>
+          <option value="low"${matchFilter.sort === "low" ? " selected" : ""}>Lowest score first</option>
+        </select></div>
+      <div><span class="flabel">&nbsp;</span>
+        <button class="btn primary" id="mt-go">Apply filters</button></div>
+    </div></div>
+    <div id="mt-count" class="muted" style="margin:0 2px 8px"></div>
     <div id="mt-list" class="grid"></div>`;
   const cs = await api("/api/consultants");
   $("#mt-c").innerHTML = `<option value="">All consultants</option>` +
     cs.map((c) => `<option value="${c.id}"${String(c.id) === String(matchFilter.consultant_id) ? " selected" : ""}>${esc(c.name)}</option>`).join("");
+  const srcs = await api("/api/sources/status");
+  $("#mt-src").innerHTML = `<option value="">All sources</option>` +
+    srcs.filter((s) => s.name !== "urlimport")
+      .map((s) => `<option value="${s.name}"${matchFilter.source === s.name ? " selected" : ""}>${esc(s.label)}</option>`).join("");
   $("#mt-go").onclick = () => {
     matchFilter.consultant_id = $("#mt-c").value;
     matchFilter.min_score = Number($("#mt-s").value) || 0;
+    matchFilter.source = $("#mt-src").value;
+    matchFilter.sort = $("#mt-sort").value;
     loadMatches();
   };
   loadMatches();
@@ -287,7 +375,11 @@ async function renderMatches() {
 async function loadMatches() {
   const el = $("#mt-list");
   el.innerHTML = `<span class="muted">Loading…</span>`;
-  const ms = await api(`/api/matches?consultant_id=${matchFilter.consultant_id}&min_score=${matchFilter.min_score}`);
+  let ms = await api(`/api/matches?consultant_id=${matchFilter.consultant_id}&min_score=${matchFilter.min_score}`);
+  if (matchFilter.source) ms = ms.filter((m) => m.source === matchFilter.source);
+  ms.sort((a, b) => matchFilter.sort === "low" ? a.score - b.score : b.score - a.score);
+  const cnt = $("#mt-count");
+  if (cnt) cnt.textContent = `${ms.length} matches`;
   el.innerHTML = ms.map((m) => `
     <div class="card">
       <div class="row spread">
@@ -372,16 +464,30 @@ async function tailorModal(mid) {
 }
 
 /* ================= APPLY QUEUE ================= */
+let queueFilter = {consultant: ""};
 async function renderQueue() {
   const el = $("#tab-queue");
   el.innerHTML = `<div class="row spread"><h2>Apply Queue</h2>
     <span class="muted">v1 is assisted apply: open the posting, submit the tailored resume, then move the card.</span></div>
+    <div class="card"><div class="filters" style="grid-template-columns:repeat(auto-fit,minmax(200px,260px))">
+      <div><label class="flabel" for="q-c">Consultant</label>
+        <select id="q-c"><option value="">All consultants</option></select></div>
+    </div></div>
+    <div id="q-count" class="muted" style="margin:0 2px 8px"></div>
     <div class="kanban" id="q-kanban"><span class="muted">Loading…</span></div>`;
   const apps = await api("/api/applications");
-  const by = {};
-  STATUSES.forEach((s) => by[s] = []);
-  apps.forEach((a) => (by[a.status] || by.queued).push(a));
-  $("#q-kanban").innerHTML = STATUSES.map((s) => `
+  const names = [...new Set(apps.map((a) => a.consultant_name).filter(Boolean))].sort();
+  $("#q-c").innerHTML = `<option value="">All consultants</option>` +
+    names.map((n) => `<option${queueFilter.consultant === n ? " selected" : ""}>${esc(n)}</option>`).join("");
+  $("#q-c").onchange = (e) => { queueFilter.consultant = e.target.value; drawQueue(); };
+  const drawQueue = () => {
+    const list = queueFilter.consultant
+      ? apps.filter((a) => a.consultant_name === queueFilter.consultant) : apps;
+    const by = {};
+    STATUSES.forEach((s) => by[s] = []);
+    list.forEach((a) => (by[a.status] || by.queued).push(a));
+    $("#q-count").textContent = `${list.length} applications`;
+    $("#q-kanban").innerHTML = STATUSES.map((s) => `
     <div class="col"><h4>${STATUS_LABEL[s]} (${by[s].length})</h4>
       ${by[s].map((a) => `
         <div class="acard">
@@ -396,15 +502,17 @@ async function renderQueue() {
           <textarea rows="1" data-notes="${a.id}" placeholder="notes…" style="margin-top:6px">${esc(a.notes || "")}</textarea>
         </div>`).join("")}
     </div>`).join("");
-  $$("[data-move]", el).forEach((sel) => sel.onchange = async () => {
-    await api(`/api/applications/${sel.dataset.move}`,
-      {method: "PATCH", body: JSON.stringify({status: sel.value})});
-    renderQueue();
-  });
-  $$("[data-notes]", el).forEach((ta) => ta.onchange = async () => {
-    await api(`/api/applications/${ta.dataset.notes}`,
-      {method: "PATCH", body: JSON.stringify({notes: ta.value})});
-  });
+    $$("[data-move]", el).forEach((sel) => sel.onchange = async () => {
+      await api(`/api/applications/${sel.dataset.move}`,
+        {method: "PATCH", body: JSON.stringify({status: sel.value})});
+      renderQueue();
+    });
+    $$("[data-notes]", el).forEach((ta) => ta.onchange = async () => {
+      await api(`/api/applications/${ta.dataset.notes}`,
+        {method: "PATCH", body: JSON.stringify({notes: ta.value})});
+    });
+  };
+  drawQueue();
 }
 
 /* ================= SETTINGS ================= */
