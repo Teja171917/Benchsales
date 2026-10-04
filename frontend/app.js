@@ -21,6 +21,15 @@ const STATUS_LABEL = {queued: "Queued", applied: "Applied",
   screening: "Screening", interview: "Interview", offered: "Offered",
   placed: "Placed", rejected: "Rejected", withdrawn: "Withdrawn"};
 
+function ago(iso) {
+  if (!iso) return "never";
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+
 /* ---------- tab nav ---------- */
 $("#tabs").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-tab]");
@@ -136,6 +145,7 @@ async function renderJobs() {
   el.innerHTML = `
     <div class="row spread"><h2>Jobs</h2>
       <button class="btn primary" id="j-run">Run job collection</button></div>
+    <div class="muted" id="j-fresh" style="margin:-4px 0 10px"></div>
     <div class="progress" id="j-prog"></div>
     <div class="card"><h3>Live job search</h3>
       <div class="muted" style="margin-bottom:8px">Type a job title — BenchPilot searches the boards right now and shows listings instantly.</div>
@@ -257,6 +267,7 @@ async function renderJobs() {
   $("#j-live-go").onclick = doLiveSearch;
   $("#j-live-title").onkeydown = (e) => { if (e.key === "Enter") doLiveSearch(); };
   $("#j-live-loc").onkeydown = (e) => { if (e.key === "Enter") doLiveSearch(); };
+  updateFreshness();
   loadJobs();
 }
 async function saveLive(jobs, btn) {
@@ -322,6 +333,26 @@ function applyJobFilters() {
     </tr>`).join("") || `<tr><td colspan="6" class="muted">No jobs match these filters.</td></tr>`}
     </table></div>`;
 }
+async function updateFreshness() {
+  const f = $("#j-fresh");
+  if (!f) return;
+  try {
+    const st = await api("/api/collect/status");
+    if (st.running) {
+      f.textContent = "Collection running right now…";
+      return;
+    }
+    const last = st.last_result
+      ? ` (+${st.last_result.jobs_new} new jobs, +${st.last_result.matches_new} new matches)` : "";
+    if (st.interval_minutes > 0) {
+      f.textContent = `Auto-refresh every ${st.interval_minutes} min · last run ${ago(st.last_run_at)}${last}`;
+    } else {
+      f.textContent = st.last_run_at
+        ? `Auto-refresh is off · last run ${ago(st.last_run_at)}${last} — click "Run job collection" for fresh data`
+        : `Auto-refresh is off — click "Run job collection" to pull fresh jobs`;
+    }
+  } catch (e) { f.textContent = ""; }
+}
 async function runCollection() {
   const prog = $("#j-prog");
   prog.textContent = "Collecting from enabled sources — this can take 1–3 minutes…";
@@ -331,6 +362,7 @@ async function runCollection() {
       `${n}: ${v.status}${v.new ? ` (+${v.new} new)` : ""}`);
     prog.innerHTML = `<div class="okbox">Done — ${s.jobs_new} new jobs, ${s.matches_new} new matches.<br>${lines.map(esc).join("<br>")}</div>`;
     loadJobs();
+    updateFreshness();
   } catch (e) { prog.innerHTML = `<div class="errbox">Collection failed: ${esc(e.message)}</div>`; }
 }
 
@@ -555,6 +587,20 @@ async function renderSettings() {
       ${srcs.filter((x) => x.name !== "urlimport").map((x) => `
         <label class="toggle"><input type="checkbox" data-src="${x.name}"${enabledSrcs.includes(x.name) ? " checked" : ""}> ${esc(x.label)}</label>`).join("")}
     </div>
+    <div class="card"><h3>Auto-refresh</h3>
+      <div class="kv">
+        <label>Re-pull jobs every</label>
+        <select id="s-interval">
+          <option value="0"${s.collect_interval_minutes === "0" ? " selected" : ""}>Off — manual only</option>
+          <option value="15"${s.collect_interval_minutes === "15" ? " selected" : ""}>15 minutes</option>
+          <option value="30"${s.collect_interval_minutes === "30" ? " selected" : ""}>30 minutes</option>
+          <option value="60"${!s.collect_interval_minutes || s.collect_interval_minutes === "60" ? " selected" : ""}>1 hour (recommended)</option>
+          <option value="120"${s.collect_interval_minutes === "120" ? " selected" : ""}>2 hours</option>
+          <option value="360"${s.collect_interval_minutes === "360" ? " selected" : ""}>6 hours</option>
+        </select>
+      </div>
+      <div class="muted">BenchPilot re-pulls every enabled source on this schedule and re-matches consultants automatically — new postings land in the job board on their own. With Adzuna keys, keep 1 hour or slower (free tier allows 250 calls/day).</div>
+    </div>
     <div class="card"><h3>Match threshold</h3>
       <div class="row"><input type="range" id="s-thr" min="0" max="100" value="${esc(s.match_threshold || 60)}">
       <b id="s-thrv">${esc(s.match_threshold || 60)}</b></div>
@@ -589,6 +635,7 @@ async function renderSettings() {
       search_queries: qs,
       enabled_sources: $$("[data-src]").filter((c) => c.checked).map((c) => c.dataset.src),
       match_threshold: $("#s-thr").value,
+      collect_interval_minutes: $("#s-interval").value,
     };
     // don't overwrite saved keys with the masked echo
     for (const k of ["adzuna_app_key", "rapidapi_key", "llm_api_key"])

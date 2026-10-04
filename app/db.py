@@ -19,6 +19,7 @@ DEFAULT_ENABLED_SOURCES = ["adzuna", "jsearch", "remoteok", "remotive"]
 
 DEFAULT_SETTINGS = {
     "match_threshold": "60",
+    "collect_interval_minutes": "60",
     "search_queries": json.dumps(DEFAULT_SEARCH_QUERIES),
     "enabled_sources": json.dumps(DEFAULT_ENABLED_SOURCES),
     "adzuna_app_id": "",

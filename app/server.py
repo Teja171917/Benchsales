@@ -4,6 +4,9 @@ import io
 import json
 import os
 import secrets
+import threading
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, Request
@@ -47,6 +50,72 @@ async def auth_gate(request: Request, call_next):
 @app.on_event("startup")
 def _startup():
     db.init_db()
+    t = threading.Thread(target=_auto_collect_loop, daemon=True,
+                         name="benchpilot-auto-collect")
+    t.start()
+
+
+# ---------- auto-refresh scheduler ----------
+_collect_lock = threading.Lock()
+_collect_status = {
+    "last_run_at": None,      # ISO timestamp of last finished run
+    "last_result": None,      # {"jobs_new": n, "matches_new": n}
+    "next_run_at": None,      # ISO timestamp of next scheduled run
+    "running": False,
+}
+
+
+def _do_collect() -> dict:
+    """Run one collection cycle (manual or scheduled). Thread-safe."""
+    from collector import run
+    with _collect_lock:
+        _collect_status["running"] = True
+        try:
+            summary = run()
+        finally:
+            _collect_status["running"] = False
+    _collect_status["last_run_at"] = datetime.now(timezone.utc).isoformat()
+    _collect_status["last_result"] = {
+        "jobs_new": summary.get("jobs_new", 0),
+        "matches_new": summary.get("matches_new", 0),
+        "errors": summary.get("errors", []),
+    }
+    return summary
+
+
+def _auto_collect_loop():
+    """Background loop: re-pull enabled sources on the configured schedule."""
+    while True:
+        try:
+            interval = int(db.get_setting("collect_interval_minutes", "60") or 0)
+        except (ValueError, TypeError):
+            interval = 0
+        if interval <= 0:
+            _collect_status["next_run_at"] = None
+            time.sleep(60)
+            continue
+        _collect_status["next_run_at"] = (
+            datetime.now(timezone.utc) + timedelta(minutes=interval)).isoformat()
+        time.sleep(interval * 60)
+        try:
+            _do_collect()
+        except Exception:
+            pass  # collector records per-source errors; keep the loop alive
+
+
+@app.get("/api/collect/status")
+def api_collect_status():
+    try:
+        interval = int(db.get_setting("collect_interval_minutes", "60") or 0)
+    except (ValueError, TypeError):
+        interval = 0
+    return {
+        "interval_minutes": interval,
+        "running": _collect_status["running"],
+        "last_run_at": _collect_status["last_run_at"],
+        "next_run_at": _collect_status["next_run_at"] if interval > 0 else None,
+        "last_result": _collect_status["last_result"],
+    }
 
 
 # ---------- consultants ----------
@@ -156,8 +225,7 @@ def api_import_url(data: dict):
 
 @app.post("/api/collect")
 def api_collect():
-    from collector import run
-    return run()
+    return _do_collect()
 
 
 LIVE_SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow]  # dice: no public API
@@ -312,7 +380,8 @@ def api_get_settings():
 def api_put_settings(data: dict):
     allowed = {"match_threshold", "search_queries", "enabled_sources",
                "adzuna_app_id", "adzuna_app_key", "rapidapi_key",
-               "llm_base_url", "llm_api_key", "llm_model"}
+               "llm_base_url", "llm_api_key", "llm_model",
+               "collect_interval_minutes"}
     for k, v in data.items():
         if k not in allowed:
             raise HTTPException(400, f"unknown setting: {k}")
