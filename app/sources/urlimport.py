@@ -22,8 +22,11 @@ def _fallback_text(html: str) -> str:
 
 
 def import_url(url: str) -> dict:
-    if not re.match(r"^https?://", url or "", re.I):
-        raise ValueError("URL must start with http:// or https://")
+    url = (url or "").strip()
+    if not url:
+        raise ValueError("URL is required")
+    if not re.match(r"^https?://", url, re.I):
+        url = "https://" + url  # tolerate pasted links without a scheme
     resp = requests.get(url, headers=UA, timeout=30)
     resp.raise_for_status()
     html = resp.text
