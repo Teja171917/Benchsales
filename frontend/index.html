@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BenchPilot — Recruiter &amp; Bench Sales Console</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">BenchPilot <span>recruiter + bench sales console</span></div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="consultants" class="active">Consultants</button>
+    <button data-tab="jobs">Jobs</button>
+    <button data-tab="matches">Matches</button>
+    <button data-tab="queue">Apply Queue</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+</header>
+<main>
+  <section class="tab active" id="tab-consultants"></section>
+  <section class="tab" id="tab-jobs"></section>
+  <section class="tab" id="tab-matches"></section>
+  <section class="tab" id="tab-queue"></section>
+  <section class="tab" id="tab-settings"></section>
+</main>
+<div id="modal-root"></div>
+<footer>BenchPilot v1 — runs locally; API keys stay on this machine.</footer>
+<script src="app.js"></script>
+</body>
+</html>
