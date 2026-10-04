@@ -1,7 +1,18 @@
+run = "python -m uvicorn app.server:app --host 0.0.0.0 --port $PORT"
 modules = ["python-3.12", "nodejs-20", "web", "bash"]
+
 
 [nix]
 channel = "stable-25_05"
 
+
 [agent]
 expertMode = true
+
+[[ports]]
+localPort = 8000
+externalPort = 80
+
+[deployment]
+deploymentTarget = "cloudrun"
+run = "python -m uvicorn app.server:app --host 0.0.0.0 --port $PORT"
