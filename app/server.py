@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import db
 from app import matcher as matcher_mod
+from app import office as office_mod
 from app import tailor as tailor_mod
 from app.skills import extract_skills
 from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, urlimport
@@ -86,6 +87,7 @@ def _do_collect() -> dict:
 def _auto_collect_loop():
     """Background loop: re-pull enabled sources on the configured schedule."""
     while True:
+        _maybe_run_office()
         try:
             interval = int(db.get_setting("collect_interval_minutes", "60") or 0)
         except (ValueError, TypeError):
@@ -101,6 +103,39 @@ def _auto_collect_loop():
             _do_collect()
         except Exception:
             pass  # collector records per-source errors; keep the loop alive
+
+
+def _maybe_run_office():
+    """Run the Agent Office once per UTC day."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    if db.get_setting("office_last_run_date") == today:
+        return
+    try:
+        briefing = office_mod.run_office()
+        db.set_setting("office_briefing_json", json.dumps(briefing))
+        db.set_setting("office_last_run_date", today)
+    except Exception:
+        pass  # never let the office break the scheduler loop
+
+
+@app.post("/api/office/run")
+def api_office_run():
+    briefing = office_mod.run_office()
+    db.set_setting("office_briefing_json", json.dumps(briefing))
+    db.set_setting("office_last_run_date",
+                   datetime.now(timezone.utc).date().isoformat())
+    return briefing
+
+
+@app.get("/api/office/briefing")
+def api_office_briefing():
+    raw = db.get_setting("office_briefing_json")
+    if not raw:
+        return {"run_at": None, "agents": {}}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"run_at": None, "agents": {}}
 
 
 @app.get("/api/collect/status")

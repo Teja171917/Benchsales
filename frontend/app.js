@@ -76,13 +76,18 @@ function closeDrawer() {
 /* ---------- nav badges ---------- */
 async function refreshBadges() {
   try {
-    const [jobs, matches, apps] = await Promise.all([
+    const [jobs, matches, apps, briefing] = await Promise.all([
       api("/api/jobs?limit=500"), api("/api/matches?min_score=0"), api("/api/applications"),
+      api("/api/office/briefing").catch(() => null),
     ]);
     const set = (id, n) => { const b = $(id); if (b) b.textContent = n > 0 ? String(n) : ""; };
     set("#nb-jobs", jobs.length);
     set("#nb-matches", matches.length);
     set("#nb-queue", apps.filter((a) => !["rejected", "withdrawn"].includes(a.status)).length);
+    if (briefing && briefing.agents) {
+      const attn = (briefing.agents.watchdog?.stale || 0) + (briefing.agents.tailor?.drafted || 0);
+      set("#nb-office", attn);
+    }
   } catch (e) { /* badges are best-effort */ }
 }
 
@@ -924,10 +929,124 @@ async function renderOverview() {
   refreshBadges();
 }
 
+/* ================= AGENT OFFICE ================= */
+const AGENT_INFO = {
+  scout: {name: "Scout", desc: "Watches the board for fresh matches above your threshold, grouped per consultant."},
+  tailor: {name: "Tailor", desc: "Pre-drafts tailored resumes for top matches (score 85+). Drafts only — flagged skills need your review before anything is queued."},
+  watchdog: {name: "Watchdog", desc: "Flags pipeline going cold: queued items with no action, applications with no update."},
+};
+async function renderOffice() {
+  const el = $("#tab-office");
+  el.innerHTML = `
+    <div class="row spread"><div><h2 style="margin-bottom:2px">Agent Office</h2>
+      <div class="muted">Three agents working your pipeline around the clock — runs automatically every day.</div></div>
+      <button class="btn primary" id="of-run">Run the office now</button></div>
+    <div class="stats" id="of-stats" style="margin-top:14px">${skelCards(4)}</div>
+    <div class="dash-grid" id="of-agents">${skelCards(3)}</div>
+    <div id="of-briefing">${skelRows(4)}</div>`;
+  $("#of-run").onclick = async () => {
+    const b = $("#of-run");
+    b.disabled = true; b.textContent = "Office is working…";
+    try {
+      await api("/api/office/run", {method: "POST"});
+      toast("Office run complete — briefing refreshed", "ok");
+    } catch (e) { toast("Office run failed: " + e.message, "err"); }
+    renderOffice(); refreshBadges();
+  };
+  let br;
+  try { br = await api("/api/office/briefing"); }
+  catch (e) {
+    $("#of-briefing").innerHTML = `<div class="errbox">Couldn't load the briefing: ${esc(e.message)}</div>`;
+    $("#of-stats").innerHTML = ""; $("#of-agents").innerHTML = "";
+    return;
+  }
+  if (!br.run_at) {
+    $("#of-stats").innerHTML = ""; $("#of-agents").innerHTML = "";
+    $("#of-briefing").innerHTML = `<div class="card"><h3>The office hasn't run yet</h3>
+      <div class="muted" style="margin-bottom:10px">It runs automatically once a day. Run it now for your first briefing: new matches, drafted resumes, and stale pipeline items.</div>
+      <button class="btn primary" id="of-run2">Run the office now</button></div>`;
+    $("#of-run2").onclick = () => $("#of-run").click();
+    return;
+  }
+  const A = br.agents || {};
+  const scout = A.scout || {new_matches: 0, by_consultant: {}};
+  const tailor = A.tailor || {drafted: 0, drafts: []};
+  const wd = A.watchdog || {stale: 0, items: []};
+
+  $("#of-stats").innerHTML = [
+    ["New matches (24h)", scout.new_matches, "accent", "matches"],
+    ["Resume drafts ready", tailor.drafted, tailor.drafted ? "good" : "", null],
+    ["Stale pipeline items", wd.stale, wd.stale ? "accent" : "", "queue"],
+    ["Briefing from", ago(br.run_at), "", null],
+  ].map(([l, n, cls, tab]) => `<div class="stat ${cls}"${tab ? ` data-goto="${tab}" role="button" tabindex="0"` : ""}>
+      <div class="n">${esc(String(n))}</div><div class="l">${l}</div></div>`).join("");
+  $$("#of-stats .stat[data-goto]").forEach((s) => {
+    s.onclick = () => go(s.dataset.goto);
+    s.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") go(s.dataset.goto); };
+  });
+
+  $("#of-agents").innerHTML = ["scout", "tailor", "watchdog"].map((k) => {
+    const info = AGENT_INFO[k];
+    const res = k === "scout" ? `${scout.new_matches} new matches`
+      : k === "tailor" ? `${tailor.drafted} drafts ready`
+      : `${wd.stale} items flagged`;
+    return `<div class="card"><h3>${info.name}</h3>
+      <div class="muted" style="margin-bottom:8px">${info.desc}</div>
+      <div><b>${esc(res)}</b> <span class="muted">· last run ${esc(ago(br.run_at))}</span></div></div>`;
+  }).join("");
+
+  const secs = [];
+  const consultants = Object.keys(scout.by_consultant || {});
+  secs.push(`<div class="card"><div class="row spread"><h3 style="margin:0">New matches in the last 24 hours</h3>
+    ${consultants.length ? `<button class="btn" id="of-allm">Open matches</button>` : ""}</div>
+    ${consultants.length ? consultants.map((c) => `
+      <div style="margin-top:10px"><b>${esc(c)}</b>
+        ${(scout.by_consultant[c] || []).map((m) => `
+          <div class="row" style="margin-top:6px">
+            <span class="score-num" style="font-size:14px">${m.score}</span>
+            <div><b>${esc(m.job_title)}</b>
+              <span class="muted"> · ${esc(m.company)} · ${esc(m.location)}</span></div>
+            <span class="badge ${esc(m.source)}">${esc(m.source)}</span>
+          </div>`).join("")}</div>`).join("")
+      : `<div class="muted" style="margin-top:8px">Nothing new since yesterday — the board is quiet.</div>`}</div>`);
+
+  secs.push(`<div class="card"><h3>Resume drafts ready for review</h3>
+    ${(tailor.drafts || []).length ? (tailor.drafts || []).map((d) => `
+      <div class="row spread" style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <div><b>${esc(d.job_title)}</b> <span class="muted">· ${esc(d.company)} · for ${esc(d.consultant_name)} · score ${d.score}</span>
+          <div style="margin-top:4px">
+            <span class="badge">${esc(d.tailored_by === "llm" ? "AI drafted" : "keyword drafted")}</span>
+            ${(d.flagged || []).length
+              ? `<span class="chip warn">needs review: ${d.flagged.map(esc).join(", ")}</span>`
+              : `<span class="chip">no added skills</span>`}
+          </div></div>
+        <button class="btn" data-draftm="${d.match_id}">Review</button>
+      </div>`).join("")
+      : `<div class="muted">No new drafts — top matches already have tailored resumes, or none scored 85+.</div>`}
+    <div class="muted" style="margin-top:8px">Drafts are never queued automatically. Review flagged skills in the tailor view before queueing.</div></div>`);
+
+  secs.push(`<div class="card"><div class="row spread"><h3 style="margin:0">Needs attention</h3>
+    ${wd.items.length ? `<button class="btn" id="of-allq">Open queue</button>` : ""}</div>
+    ${wd.items.length ? wd.items.map((w) => `
+      <div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <span class="badge">${esc(w.status)}</span>
+        <div><b>${esc(w.job_title)}</b> <span class="muted">· ${esc(w.company)} · ${esc(w.consultant_name)}</span>
+          <div class="muted">${esc(w.note)}</div></div>
+      </div>`).join("")
+      : `<div class="muted" style="margin-top:8px">Pipeline is healthy — nothing going cold.</div>`}</div>`);
+
+  $("#of-briefing").innerHTML = secs.join("");
+  const allm = $("#of-allm");
+  if (allm) allm.onclick = () => go("matches");
+  const allq = $("#of-allq");
+  if (allq) allq.onclick = () => go("queue");
+  $$("[data-draftm]", el).forEach((b) => b.onclick = () => { go("matches"); });
+}
+
 /* ---------- router ---------- */
 function render(tab) {
   ({overview: renderOverview, consultants: renderConsultants, jobs: renderJobs, matches: renderMatches,
-    queue: renderQueue, settings: renderSettings})[tab]();
+    queue: renderQueue, office: renderOffice, settings: renderSettings})[tab]();
 }
 initTheme();
 render("overview");
