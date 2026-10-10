@@ -1105,6 +1105,38 @@ class EnvSettingsTests(unittest.TestCase):
             tmp.cleanup()
 
 
+class RoleFitTests(unittest.TestCase):
+    def test_fits_role_rule(self):
+        self.assertTrue(matcher.fits_role({"title": 20, "skill": 50}))
+        self.assertFalse(matcher.fits_role({"title": 0, "skill": 80}))
+        self.assertTrue(matcher.fits_role({"title": 0, "skill": 95}))
+
+    def test_prune_removes_unrelated_unused_matches_only(self):
+        tmp = tempfile.TemporaryDirectory()
+        old = db.DB_PATH
+        db.DB_PATH = Path(tmp.name) / "r.db"
+        try:
+            db.init_db()
+            c = db.create_consultant({"name": "Raji", "email": "r@x.com"})
+            db.upsert_resume(c["id"], "r.txt",
+                             "RAJI\nTeamcenter PLM Administrator\nSkills: Teamcenter, SQL, Jira, Selenium, Java",
+                             ["teamcenter", "sql", "jira", "selenium", "java"])
+            good = db.insert_job({"source": "t", "source_id": "1", "title": "Teamcenter Administrator",
+                                  "company": "A", "location": "Remote", "remote_flag": True,
+                                  "description": "Teamcenter sql jira", "posted_at": ""})
+            bad = db.insert_job({"source": "t", "source_id": "2", "title": "SDET Engineer",
+                                 "company": "B", "location": "Remote", "remote_flag": True,
+                                 "description": "selenium java sql jira testing playwright cypress appium", "posted_at": ""})
+            db.insert_match(c["id"], good, 80.0, {"skill": 90, "title": 50, "location": 100, "recency": 0}, [])
+            db.insert_match(c["id"], bad, 70.0, {"skill": 80, "title": 0, "location": 100, "recency": 0}, [])
+            self.assertEqual(matcher.prune_misfits(), 1)
+            ids = [m["job_id"] for m in db.list_matches()]
+            self.assertEqual(ids, [good])
+        finally:
+            db.DB_PATH = old
+            tmp.cleanup()
+
+
 class AdzunaRemoteTests(unittest.TestCase):
     def setUp(self):
         from app.sources import adzuna

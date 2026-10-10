@@ -102,6 +102,7 @@ def run() -> dict:
         }))
 
     try:
+        summary["matches_removed"] = matcher.prune_misfits()
         summary["matches_new"] = matcher.run_all()
     except Exception as e:  # noqa: BLE001
         summary["errors"].append(f"matcher: {e}")

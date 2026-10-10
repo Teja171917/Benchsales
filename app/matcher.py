@@ -100,6 +100,23 @@ def consultant_title(raw_text: str) -> str:
     return cand
 
 
+def consultant_titles(raw_text: str) -> list:
+    """The main title plus the other titles on the same header line, e.g.
+    "Senior QA Test Manager | Test Lead | Automation Engineer" gives all three,
+    so a job for any of the person's own roles counts as a title match."""
+    main = consultant_title(raw_text)
+    out = [main] if main else []
+    lines = [ln.strip() for ln in (raw_text or "").splitlines() if ln.strip()]
+    for ln in lines[:3]:
+        if "|" in ln and not re.search(r"@|\d{3}", ln) and main and main in ln:
+            for part in ln.split("|"):
+                part = part.strip()
+                if part and part not in out and len(part.split()) <= 6:
+                    out.append(part)
+            break
+    return out
+
+
 @lru_cache(maxsize=4096)
 def _jd_skills(jd_text: str) -> tuple[frozenset, frozenset]:
     """Skill extraction is the slow part and is identical for every consultant
@@ -142,8 +159,10 @@ def score(consultant: dict, job: dict) -> dict:
         skill_score *= min(1.0, len(jd_skills) / 3.0)
 
     # 20% title similarity
-    title_score = _jaccard(_tokens(consultant_title(consultant.get("raw_text", ""))),
-                           _tokens(job.get("title", "")))
+    job_tokens = _tokens(job.get("title", ""))
+    title_score = max((_jaccard(_tokens(t), job_tokens)
+                       for t in consultant_titles(consultant.get("raw_text", ""))),
+                      default=0.0)
 
     # 10% location/remote fit
     remote = bool(job.get("remote_flag")) or "remote" in (job.get("location") or "").lower()
@@ -178,6 +197,18 @@ def score(consultant: dict, job: dict) -> dict:
     }
 
 
+STRONG_SKILL = 90.0   # a job whose title is unrelated needs a near-perfect skill fit
+
+
+def fits_role(breakdown: dict) -> bool:
+    """A job is shown to a consultant only when its title has something in
+    common with the person's own role(s), or the skills match almost
+    perfectly. Skill overlap alone is not enough: a Teamcenter administrator
+    and a test engineer both list Jira and SQL."""
+    return (breakdown.get("title", 0) > 0
+            or breakdown.get("skill", 0) >= STRONG_SKILL)
+
+
 def run_all(threshold: float | None = None,
             consultant_id: int | None = None) -> int:
     """Score every consultant with a resume against every job; insert new
@@ -205,7 +236,7 @@ def run_all(threshold: float | None = None,
             if not emp_compatible(c, emptype.from_db(j.get("emp_tags") or "")):
                 continue
             r = score(c, j)
-            if r["score"] >= threshold:
+            if r["score"] >= threshold and fits_role(r["breakdown"]):
                 if db.insert_match(c["id"], j["id"], r["score"],
                                    r["breakdown"], r["missing_skills"]):
                     new += 1
@@ -235,3 +266,29 @@ def rescore_existing(consultant_id: int | None = None) -> int:
             db.update_match(m["id"], r["score"], r["breakdown"], r["missing_skills"])
             changed += 1
     return changed
+
+
+def prune_misfits() -> int:
+    """Remove matches that fail the role check (see fits_role) and that nobody
+    has used: no application, tailored resume or outreach draft depends on
+    them. Returns how many were removed."""
+    consultants = {c["id"]: c for c in db.consultants_with_resumes()}
+    with db.get_conn() as conn:
+        jobs = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM jobs")}
+        rows = [dict(r) for r in conn.execute(
+            'SELECT m.id, m.consultant_id, m.job_id FROM "matches" m '
+            'WHERE NOT EXISTS (SELECT 1 FROM applications a WHERE a.match_id=m.id) '
+            'AND NOT EXISTS (SELECT 1 FROM tailored_resumes t WHERE t.match_id=m.id) '
+            'AND NOT EXISTS (SELECT 1 FROM outreach_drafts o WHERE o.match_id=m.id)')]
+    drop = []
+    for m in rows:
+        c, j = consultants.get(m["consultant_id"]), jobs.get(m["job_id"])
+        if not c or not j:
+            continue
+        if not fits_role(score(c, j)["breakdown"]):
+            drop.append(m["id"])
+    if drop:
+        with db.get_conn() as conn:
+            conn.executemany('DELETE FROM "matches" WHERE id=?', [(i,) for i in drop])
+            conn.commit()
+    return len(drop)
