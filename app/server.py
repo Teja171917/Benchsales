@@ -16,6 +16,7 @@ from app import autolearn, contact as contact_mod, db, emptype, market, portals,
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
+from app import resume_import
 from app import tailor as tailor_mod
 from app.skills import display_name, extract_skills
 from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, urlimport
@@ -111,6 +112,10 @@ def _auto_collect_loop():
     setting, slowed down when needed to respect the job API's daily limit),
     then let the Agent Office work on the fresh jobs."""
     while True:
+        try:
+            _maybe_import_folder()   # new resumes first, so they get searched this round
+        except Exception:
+            pass
         try:
             interval = autolearn.effective_interval_minutes()
             if interval <= 0:
@@ -347,12 +352,10 @@ async def api_upload_resume(cid: int, file: UploadFile = File(...)):
     return r
 
 
-@app.post("/api/resumes/auto")
-async def api_resume_auto(file: UploadFile = File(...), kick: int = 1):
+def _auto_resume(filename: str, data: bytes, kick: bool = True) -> dict:
     """One resume file in -> consultant created (or found) from the name /
-    email in the resume, resume attached, skills + searches + matches done."""
-    data = await file.read()
-    filename = file.filename or "resume"
+    email in the resume, resume attached, skills + searches + matches done.
+    Shared by the Add resumes button and the Drive folder import."""
     if not data:
         raise HTTPException(400, "the file is empty")
     try:
@@ -388,6 +391,80 @@ async def api_resume_auto(file: UploadFile = File(...), kick: int = 1):
     r.update(consultant_id=c["id"], name=c["name"], created=created,
              email=c.get("email", ""), location=c.get("location", ""))
     return r
+
+
+@app.post("/api/resumes/auto")
+async def api_resume_auto(file: UploadFile = File(...), kick: int = 1):
+    data = await file.read()
+    return _auto_resume(file.filename or "resume", data, bool(kick))
+
+
+# ---------- resume folder import (Google Drive) ----------
+_import_status = {"running": False, "last_run_at": None, "last_result": None}
+_import_lock = threading.Lock()
+
+
+def _do_import() -> dict:
+    """Read new resumes from the Drive folder. Thread-safe, never raises."""
+    if not _import_lock.acquire(blocking=False):
+        return {"error": "an import is already running"}
+    _import_status["running"] = True
+    try:
+        res = resume_import.run(_auto_resume)
+    except Exception as e:  # pragma: no cover - run() already catches
+        res = {"error": f"import failed: {e.__class__.__name__}", "added": [],
+               "updated": [], "failed": [], "skipped": 0, "waiting": 0}
+    finally:
+        _import_status["running"] = False
+        _import_lock.release()
+    now = datetime.now(timezone.utc).isoformat()
+    db.set_setting("last_import_at", now)
+    _import_status["last_run_at"] = now
+    _import_status["last_result"] = res
+    return res
+
+
+def _maybe_import_folder():
+    """Scheduled check of the resume folder (about every hour)."""
+    s = db.get_settings()
+    if not (s.get("resume_folder_url") and s.get("google_api_key")):
+        return
+    try:
+        minutes = max(5, int(float(s.get("resume_import_minutes") or 60)))
+    except ValueError:
+        minutes = 60
+    last = s.get("last_import_at") or ""
+    try:
+        d = datetime.fromisoformat(last.replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) < d + timedelta(minutes=minutes):
+            return
+    except ValueError:
+        pass
+    _do_import()
+
+
+@app.get("/api/resume-import/status")
+def api_import_status():
+    s = db.get_settings()
+    with db.get_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) AS n FROM imported_files "
+                         "WHERE status='ok'").fetchone()["n"]
+    return {"configured": bool(s.get("resume_folder_url") and s.get("google_api_key")),
+            "running": _import_status["running"],
+            "last_run_at": _import_status["last_run_at"] or s.get("last_import_at") or None,
+            "last_result": _import_status["last_result"],
+            "files_imported": n}
+
+
+@app.post("/api/resume-import/run")
+def api_import_run():
+    if _import_status["running"]:
+        return {"started": False}
+    threading.Thread(target=_do_import, daemon=True,
+                     name="benchpilot-import").start()
+    return {"started": True}
 
 
 @app.post("/api/collect/kick")
@@ -649,7 +726,7 @@ def api_update_application(aid: int, data: dict):
 
 
 # ---------- settings / sources ----------
-MASKED_KEYS = {"adzuna_app_key", "rapidapi_key", "llm_api_key"}
+MASKED_KEYS = {"adzuna_app_key", "rapidapi_key", "llm_api_key", "google_api_key"}
 
 
 def _mask(key: str, value: str) -> str:
@@ -670,7 +747,8 @@ def api_put_settings(data: dict):
                "llm_base_url", "llm_api_key", "llm_model",
                "collect_interval_minutes", "usa_only", "collect_emp_types",
                "auto_queries", "max_queries", "auto_learn_skills",
-               "adzuna_daily_budget", "tailor_cutoff", "tailor_max_per_run"}
+               "adzuna_daily_budget", "tailor_cutoff", "tailor_max_per_run",
+               "resume_folder_url", "google_api_key", "resume_import_minutes"}
     for k, v in data.items():
         if k not in allowed:
             raise HTTPException(400, f"unknown setting: {k}")

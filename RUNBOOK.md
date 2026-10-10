@@ -167,3 +167,12 @@ Still needs a person: changing the code, and keeping the app awake. A free Repli
 - **Tailor** drafts for matches at or above the score in Settings (default **65**, **10 drafts a day**). Each draft shows what the score could become if a person confirms the missing skills (for example `70.7 -> 82.3`). Agents never add a skill themselves.
 - With no AI key the draft only re-orders skills and bullets. For real AI rewriting fill the three **LLM** fields in Settings. The AI is told never to add skills, employers or dates.
 - **Add resumes** (Consultants tab): choose many resume files at once; each creates or updates the consultant from the name, email and city in the resume, then skills, job search and matching start by themselves.
+
+## Resume folder (Google Drive) - resumes come in by themselves
+
+1. Put the resumes in one Google Drive folder. Share it: **Share > General access > Anyone with the link** (viewer).
+2. Get a free Google API key: `console.cloud.google.com` > new project > **APIs & Services > Library > Google Drive API > Enable** > **Credentials > Create credentials > API key**.
+3. In the site: **Settings > Resume folder (Google Drive)**: paste the folder link and the key, press **Save settings**, then **Read the folder now**.
+4. From then on the site checks the folder about every hour. Each new or changed resume creates/updates the consultant (name, email, city from the resume), then skills, job search, matching and the agents follow.
+
+Notes: only files directly inside the folder are read (PDF, Word, text, Google Docs); subfolders are skipped. Nothing is changed or deleted in Drive. Up to 25 files are read per check (the rest on the next one). A file that cannot be read is reported once and not retried until it changes. Resumes stay in this app's database only - never put real resumes in the GitHub repo.

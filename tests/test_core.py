@@ -767,5 +767,96 @@ class ContactTests(unittest.TestCase):
         self.assertEqual(c["name"], "Jane Doe")
 
 
+class ResumeImportTests(unittest.TestCase):
+    """Google Drive folder import (network calls are faked)."""
+    def setUp(self):
+        from app import resume_import
+        self.ri = resume_import
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "i.db"
+        db.init_db()
+        self.files = [
+            {"id": "f1", "name": "Sharan Murali Resume.docx", "mimeType": self.ri.DOCX,
+             "md5Checksum": "aaa"},
+            {"id": "f2", "name": "Ravi.pdf", "mimeType": "application/pdf",
+             "md5Checksum": "bbb"},
+            {"id": "f3", "name": "photo.png", "mimeType": "image/png", "md5Checksum": "c"},
+            {"id": "f4", "name": "Priya (Google Doc)", "mimeType": self.ri.GDOC,
+             "modifiedTime": "2026-10-01T00:00:00Z"},
+        ]
+        self._lf, self._dl = self.ri.list_folder, self.ri.download
+        self.ri.list_folder = lambda fid, key: list(self.files)
+        self.ri.download = lambda f, key: b"data-" + f["id"].encode()
+        self.settings = {"resume_folder_url":
+                         "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp?usp=sharing",
+                         "google_api_key": "k"}
+        self.seen = []
+
+    def tearDown(self):
+        self.ri.list_folder, self.ri.download = self._lf, self._dl
+        db.DB_PATH = self._old
+        self.tmp.cleanup()
+
+    def ingest(self, name, data, kick):
+        self.seen.append((name, kick))
+        if name.startswith("Ravi"):
+            raise ValueError("could not read this file")
+        return {"consultant_id": len(self.seen), "name": name.split(".")[0],
+                "created": True, "new_matches": 2}
+
+    def test_folder_id_from_links(self):
+        f = self.ri.folder_id
+        self.assertEqual(f("https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp?usp=sharing"),
+                         "1AbCdEfGhIjKlMnOp")
+        self.assertEqual(f("https://drive.google.com/open?id=1AbCdEfGhIjKlMnOp"), "1AbCdEfGhIjKlMnOp")
+        self.assertEqual(f("1AbCdEfGhIjKlMnOp"), "1AbCdEfGhIjKlMnOp")
+        self.assertEqual(f("not a link"), "")
+
+    def test_reads_resumes_once_and_skips_other_files(self):
+        r = self.ri.run(self.ingest, self.settings)
+        self.assertEqual(len(r["added"]), 2)          # f1 + the Google Doc
+        self.assertEqual(len(r["failed"]), 1)         # Ravi.pdf could not be read
+        self.assertEqual(r["skipped"], 1)             # the .png
+        names = [n for n, _ in self.seen]
+        self.assertIn("Priya (Google Doc).docx", names)   # Google Doc exported as .docx
+        self.assertEqual([k for _, k in self.seen].count(True), 1)  # job search kicked once
+        self.seen.clear()
+        r2 = self.ri.run(self.ingest, self.settings)  # nothing new -> nothing read again
+        self.assertEqual((r2["added"], r2["failed"], self.seen), ([], [], []))
+
+    def test_changed_file_is_read_again(self):
+        self.ri.run(self.ingest, self.settings)
+        self.seen.clear()
+        self.files[0]["md5Checksum"] = "new"
+        r = self.ri.run(self.ingest, self.settings)
+        self.assertEqual([n for n, _ in self.seen], ["Sharan Murali Resume.docx"])
+
+    def test_not_set_up_and_drive_errors_do_not_raise(self):
+        self.assertIn("not set up", self.ri.run(self.ingest, {})["error"])
+        def boom(fid, key):
+            raise self.ri.DriveError("folder not found")
+        self.ri.list_folder = boom
+        self.assertEqual(self.ri.run(self.ingest, self.settings)["error"], "folder not found")
+
+    def test_download_problem_is_retried_next_time(self):
+        calls = {"n": 0}
+        def flaky(f, key):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise self.ri.DriveError("network")
+            return b"x"
+        self.ri.download = flaky
+        self.files = self.files[:1]
+        r = self.ri.run(self.ingest, self.settings)
+        self.assertEqual(len(r["failed"]), 1)
+        r = self.ri.run(self.ingest, self.settings)
+        self.assertEqual(len(r["added"]), 1)
+
+    def test_per_run_limit(self):
+        r = self.ri.run(self.ingest, self.settings, files_per_run=1)
+        self.assertEqual(r["waiting"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,10 @@ DEFAULT_SETTINGS = {
     # Agent Office / Tailor: draft a tailored resume for matches at/above
     # this score (drafts only; a person confirms any added skill)
     "tailor_cutoff": "65",
+    # resume folder import (Google Drive): see app/resume_import.py
+    "resume_folder_url": "",
+    "google_api_key": "",
+    "resume_import_minutes": "60",
     "tailor_max_per_run": "10",
     "search_queries": json.dumps(DEFAULT_SEARCH_QUERIES),
     "office_autopilot": "1",
@@ -134,6 +138,15 @@ CREATE TABLE IF NOT EXISTS learned_skills (
     skill TEXT PRIMARY KEY,
     source TEXT DEFAULT '',
     learned_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS imported_files (
+    file_id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    version TEXT DEFAULT '',
+    status TEXT DEFAULT 'ok',
+    consultant_id INTEGER,
+    error TEXT DEFAULT '',
+    imported_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS api_usage (
     day TEXT NOT NULL,
