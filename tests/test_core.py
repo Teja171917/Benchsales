@@ -977,5 +977,27 @@ class ResumeAiTests(unittest.TestCase):
             tmp.cleanup()
 
 
+class JenkinAliasTests(unittest.TestCase):
+    def test_typo_maps_to_jenkins_and_stale_learned_skill_is_dropped(self):
+        tmp = tempfile.TemporaryDirectory()
+        old = db.DB_PATH
+        db.DB_PATH = Path(tmp.name) / "j.db"
+        try:
+            db.init_db()
+            self.assertIn("jenkins", skills.extract_skills("Configuration Tools SVN, Git, Jenkin"))
+            self.assertNotIn("jenkin", skills.extract_skills("Configuration Tools SVN, Git, Jenkin"))
+            db.add_learned_skills(["jenkin"], source="old")      # learned before the alias existed
+            autolearn.maintain()
+            self.assertNotIn("jenkin", [r["skill"] for r in db.list_learned_skills()])
+            c = db.create_consultant({"name": "R"})
+            db.upsert_resume(c["id"], "r.txt", "R\nSkills\nSVN, Git, Jenkin", ["jenkin", "git"])
+            autolearn.maintain()
+            self.assertIn("jenkins", db.get_resume(c["id"])["skills_json"])
+        finally:
+            skills.set_learned([])
+            db.DB_PATH = old
+            tmp.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()

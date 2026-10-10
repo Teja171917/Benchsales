@@ -133,6 +133,11 @@ def maintain() -> dict:
     Learns new skills, refreshes stored resume skills, and rescores existing
     matches when something changed. Never deletes a match."""
     out = {"learned": [], "resumes_refreshed": 0, "rescored": 0}
+    # a skill learned earlier that has since become an alias ("jenkin" ->
+    # "jenkins") is a spelling of a known skill, not a skill of its own
+    for row in db.list_learned_skills():
+        if (row.get("skill") or "").lower() in skills_mod.ALIASES:
+            db.delete_learned_skill(row["skill"])
     sync_vocabulary()
     consultants = db.consultants_with_resumes()
     if db.get_setting("auto_learn_skills", "1") == "1":

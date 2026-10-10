@@ -103,6 +103,7 @@ ALIASES = {
     "ms teams": "microsoft teams",
     "gen ai": "generative ai",
     "genai": "generative ai",
+    "jenkin": "jenkins",          # a common typo (seen in a real resume)
 }
 
 _SKILL_SET = frozenset(SKILLS)
@@ -162,6 +163,8 @@ def extract_skills(text: str) -> list[str]:
         if _pattern(skill).search(t):
             found.add(skill)
     for skill in _LEARNED:
+        if skill in ALIASES:   # learned before it became an alias: the alias wins
+            continue
         if _pattern(skill).search(t):
             found.add(skill)
     # aliases
