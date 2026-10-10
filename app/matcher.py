@@ -52,16 +52,52 @@ def _parse_date(s: str):
         return None
 
 
+_ROLE_WORD = (r"Professional|Engineer|Developer|Administrator|Analyst|Architect|"
+              r"Consultant|Specialist|Manager|Lead|Tester|Programmer|Admin")
+_ROLE_RE = re.compile(r"((?:[A-Z][A-Za-z+/.&#\-]*[ \t]+){1,5}(?:" + _ROLE_WORD + r"))\b")
+_FLUFF = re.compile(r"^(results?[- ]driven|experienced|dynamic|motivated|detail[- ]oriented|"
+                    r"seasoned|highly|skilled|passionate|proven|dedicated|accomplished|"
+                    r"resourceful|self[- ]motivated|versatile|talented|a|an|the)$", re.I)
+
+
+def role_from_summary(raw_text: str) -> str:
+    """For resumes with no title line: the role named in the summary, e.g.
+    "Results-driven Teamcenter PLM Professional with 8+ years..." ->
+    "Teamcenter PLM". Returns "" when nothing sensible is found."""
+    head = (raw_text or "")[:2500]
+    m = _ROLE_RE.search(head)
+    if not m:
+        return ""
+    words = m.group(1).split()
+    while words and _FLUFF.match(words[0]):
+        words.pop(0)
+    if words and words[-1].lower() == "professional":
+        words.pop()                      # "PLM Professional" -> "PLM"
+    return " ".join(words) if words else ""
+
+
 def consultant_title(raw_text: str) -> str:
     """Best guess at the candidate's current title: the first line, unless it
-    looks like a name (short, no tech terms) — then the second line."""
+    looks like a name (short, no tech terms) - then the second line. When that
+    line is a contact line (phone / email) there is no title line, so the role
+    is read from the summary instead."""
     lines = [ln.strip() for ln in (raw_text or "").splitlines() if ln.strip()]
     if not lines:
         return ""
     first = lines[0]
     if len(first.split()) <= 4 and not extract_skills(first) and len(lines) > 1:
-        return lines[1].split("|")[0].strip()
-    return first.split("|")[0].strip()
+        cand = lines[1].split("|")[0].strip()
+    else:
+        cand = first.split("|")[0].strip()
+    if re.search(r"@|\d{3}", cand) or not re.search(r"[A-Za-z]{3}", cand):
+        return role_from_summary(raw_text) or cand
+    if len(cand.split()) <= 3 and not re.search(r"engineer|developer|analyst|architect|tester|"
+                                                 r"administrator|consultant|manager|specialist|"
+                                                 r"lead|programmer|admin|qa|devops|sdet", cand, re.I):
+        # a heading such as "PROFESSIONAL SUMMARY", not a title
+        if re.match(r"(?i)(professional |career |executive )?(summary|profile|objective)", cand):
+            return role_from_summary(raw_text) or cand
+    return cand
 
 
 @lru_cache(maxsize=4096)

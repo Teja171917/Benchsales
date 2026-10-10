@@ -942,16 +942,6 @@ async function renderSettings() {
       </div>
       <div class="muted">Keys are stored on this machine only and shown masked. The LLM is also used to read resumes. Resume text is sent to that AI provider. Without an LLM key, tailoring and resume reading use the built-in simple methods and more resumes are marked "Needs a quick check".</div>
     </div>
-    <div class="card"><h3>Resume folder (Google Drive)</h3>
-      <div class="muted" style="margin-bottom:8px">Put the resumes in one Google Drive folder and share it as "Anyone with the link can view". BenchPilot reads the folder by itself and adds every new resume as a consultant. Only files directly inside that folder are read.</div>
-      <div class="kv">
-        <label>Drive folder link</label><input type="text" id="s-rfolder" value="${esc(s.resume_folder_url || "")}" placeholder="https://drive.google.com/drive/folders/...">
-        <label>Google API key</label><input type="password" id="s-gkey" value="${esc(s.google_api_key || "")}" placeholder="${s.google_api_key ? "saved (hidden)" : ""}">
-      </div>
-      <div class="row" style="margin-top:8px"><button class="btn" id="s-rimport">Read the folder now</button>
-        <span class="muted">Also runs by itself about every hour.</span></div>
-      <div id="s-rimpres" style="margin-top:8px"><span class="muted">Loading…</span></div>
-    </div>
     <div class="card"><h3>Fully automatic mode</h3>
       <label class="toggle"><input type="checkbox" id="s-autoq"${s.auto_queries === "0" ? "" : " checked"}> Search for the jobs the resumes are for (role + city, and Remote) — no typing needed</label>
       <label class="toggle"><input type="checkbox" id="s-autolearn"${s.auto_learn_skills === "0" ? "" : " checked"}> Learn new skills from resumes by itself</label>
@@ -1003,32 +993,6 @@ async function renderSettings() {
       }).join("");
     } catch (e) { box.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
   };
-  const showImport = async () => {
-    const box = $("#s-rimpres");
-    if (!box) return;
-    try {
-      const st = await api("/api/resume-import/status");
-      const r = st.last_result;
-      const bits = [];
-      if (!st.configured) bits.push(`<span class="muted">Not set up yet — add the folder link and the Google key, press Save, then read the folder.</span>`);
-      else {
-        bits.push(`<div><b>${st.files_imported}</b> resume file(s) imported so far${st.last_run_at ? ` · last check ${esc(ago(st.last_run_at))}` : ""}${st.running ? " · <b>reading now…</b>" : ""}</div>`);
-        if (r && r.error) bits.push(`<div class="errbox">${esc(r.error)}</div>`);
-        if (r && (r.added || []).length) bits.push(`<div class="okbox">Added: ${r.added.map((x) => esc(x.name)).join(", ")}</div>`);
-        if (r && (r.updated || []).length) bits.push(`<div class="okbox">Updated: ${r.updated.map((x) => esc(x.name)).join(", ")}</div>`);
-        if (r && (r.failed || []).length) bits.push(`<div class="errbox">${r.failed.map(esc).join("<br>")}</div>`);
-        if (r && r.waiting) bits.push(`<div class="muted">${r.waiting} more file(s) will be read on the next check.</div>`);
-      }
-      box.innerHTML = bits.join("");
-      if (st.running) setTimeout(showImport, 3000);
-    } catch (e) { box.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
-  };
-  $("#s-rimport").onclick = async () => {
-    await api("/api/resume-import/run", {method: "POST"});
-    toast("Reading the folder…", "ok");
-    setTimeout(showImport, 1500);
-  };
-  showImport();
   (async () => {
     const box = $("#s-auto");
     try {
@@ -1071,8 +1035,6 @@ async function renderSettings() {
       llm_base_url: $("#s-llmurl").value.trim(),
       llm_api_key: $("#s-llmkey").value,
       llm_model: $("#s-llmmodel").value.trim(),
-      resume_folder_url: $("#s-rfolder").value.trim(),
-      google_api_key: $("#s-gkey").value,
       tailor_cutoff: $("#s-tcut").value.trim() || "65",
       tailor_max_per_run: $("#s-tmax").value.trim() || "10",
       search_queries: qs,

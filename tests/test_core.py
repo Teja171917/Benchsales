@@ -999,5 +999,24 @@ class JenkinAliasTests(unittest.TestCase):
             tmp.cleanup()
 
 
+class RoleFromSummaryTests(unittest.TestCase):
+    RAJI = ("RAJESWARI\n281-627-6787 | rajisplmtc@gmail.com\nPROFESSIONAL SUMMARY\n"
+            "Results-driven Teamcenter PLM Professional with 8+ years of experience in "
+            "Teamcenter administration.\nAREAS OF EXPERTISE\n")
+
+    def test_role_is_read_from_the_summary_when_there_is_no_title_line(self):
+        self.assertEqual(matcher.role_from_summary(self.RAJI), "Teamcenter PLM")
+        self.assertEqual(matcher.consultant_title(self.RAJI), "Teamcenter PLM")
+        self.assertEqual(autolearn.headline_title(self.RAJI, ["agile", "c++"]), "Teamcenter PLM")
+
+    def test_title_line_still_wins(self):
+        t = "SHARAN MURALI\nSenior QA Test Manager | Test Lead\nsharmurali9@gmail.com\n"
+        self.assertEqual(matcher.consultant_title(t), "Senior QA Test Manager")
+        self.assertEqual(autolearn.headline_title(t, []), "Senior QA Test Manager")
+
+    def test_nothing_sensible_gives_empty(self):
+        self.assertEqual(matcher.role_from_summary("hello world\nsome text"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

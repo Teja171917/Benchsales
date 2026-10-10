@@ -179,6 +179,10 @@ def headline_title(raw_text: str, skills: list | None = None) -> str:
                         t, re.I))
     if ok:
         return t
+    # no title line: use the role named in the summary ("Teamcenter PLM")
+    r = matcher.role_from_summary(raw_text or "")
+    if r and 1 <= len(r.split()) <= 5 and re.search(r"[A-Za-z]{3}", r):
+        return r
     sk = [s for s in (skills or []) if len(s) > 2][:2]
     return " ".join(sk)
 
