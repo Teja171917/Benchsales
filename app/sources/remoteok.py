@@ -1,5 +1,5 @@
 """RemoteOK adapter. No key needed. Remote tech jobs."""
-from .common import get, clean, strip_html
+from .common import get_json_cached, clean, strip_html
 
 NAME = "remoteok"
 LABEL = "RemoteOK (no key)"
@@ -10,9 +10,7 @@ def enabled(settings: dict) -> bool:
 
 
 def fetch(query: dict, settings: dict) -> list[dict]:
-    r = get("https://remoteok.com/api")
-    r.raise_for_status()
-    data = r.json()
+    data = get_json_cached("https://remoteok.com/api")
     if isinstance(data, dict):  # API sometimes wraps in {"jobs": [...]}
         data = data.get("jobs", [])
     want = (query.get("title") or "").lower().split()

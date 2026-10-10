@@ -1,6 +1,6 @@
 """Arbeitnow adapter (bonus, no key). EU-leaning job board.
 Off by default for a US bench-sales team; toggle in Settings."""
-from .common import get, clean
+from .common import get_json_cached, clean
 
 NAME = "arbeitnow"
 LABEL = "Arbeitnow (no key, EU-leaning)"
@@ -11,11 +11,10 @@ def enabled(settings: dict) -> bool:
 
 
 def fetch(query: dict, settings: dict) -> list[dict]:
-    r = get("https://www.arbeitnow.com/api/job-board-api")
-    r.raise_for_status()
+    payload = get_json_cached("https://www.arbeitnow.com/api/job-board-api")
     want = (query.get("title") or "").lower().split()
     jobs: list[dict] = []
-    for j in r.json().get("data", []):
+    for j in payload.get("data", []):
         title = clean(j.get("title"))
         if want and not any(w in title.lower() for w in want):
             continue

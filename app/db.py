@@ -5,6 +5,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import emptype
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("BENCHPILOT_DB", BASE_DIR / "data" / "benchpilot.db"))
 
@@ -19,7 +21,18 @@ DEFAULT_ENABLED_SOURCES = ["adzuna", "jsearch", "remoteok", "remotive"]
 
 DEFAULT_SETTINGS = {
     "match_threshold": "60",
+    # USA market: drop jobs that clearly name a non-US location
+    "usa_only": "1",
+    # which employment types the recruiter wants (steers Adzuna/JSearch queries)
+    "collect_emp_types": "fulltime,c2c,w2",
     "collect_interval_minutes": "60",
+    # fully automatic mode: search for what the consultants' resumes say, and
+    # learn new skill names from resumes (see app/autolearn.py)
+    "auto_queries": "1",
+    "max_queries": "8",
+    "auto_learn_skills": "1",
+    # Adzuna's default key allows 250 calls/day and 2,500/month; stay under it
+    "adzuna_daily_budget": "80",
     "search_queries": json.dumps(DEFAULT_SEARCH_QUERIES),
     "enabled_sources": json.dumps(DEFAULT_ENABLED_SOURCES),
     "adzuna_app_id": "",
@@ -40,6 +53,7 @@ CREATE TABLE IF NOT EXISTS consultants (
     visa_status TEXT DEFAULT '',
     linkedin_url TEXT DEFAULT '',
     notes TEXT DEFAULT '',
+    emp_pref TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS resumes (
@@ -64,6 +78,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     posted_at TEXT DEFAULT '',
     salary TEXT DEFAULT '',
     employment_type TEXT DEFAULT '',
+    emp_tags TEXT,
     fetched_at TEXT NOT NULL,
     UNIQUE(source, source_id)
 );
@@ -102,6 +117,17 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS learned_skills (
+    skill TEXT PRIMARY KEY,
+    source TEXT DEFAULT '',
+    learned_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS api_usage (
+    day TEXT NOT NULL,
+    source TEXT NOT NULL,
+    hits INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, source)
+);
 """
 
 
@@ -117,13 +143,39 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _columns(conn, table: str) -> set:
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # --- migrations for databases created by older versions ---
+        if "emp_tags" not in _columns(conn, "jobs"):
+            conn.execute("ALTER TABLE jobs ADD COLUMN emp_tags TEXT")
+        if "emp_pref" not in _columns(conn, "consultants"):
+            conn.execute("ALTER TABLE consultants ADD COLUMN emp_pref TEXT DEFAULT ''")
+        # backfill employment tags for jobs saved before tagging existed
+        for r in conn.execute("SELECT id, employment_type, title, description "
+                              "FROM jobs WHERE emp_tags IS NULL").fetchall():
+            tags = emptype.classify(r["employment_type"], r["title"], r["description"])
+            conn.execute("UPDATE jobs SET emp_tags=? WHERE id=?",
+                         (emptype.to_db(tags), r["id"]))
         for k, v in DEFAULT_SETTINGS.items():
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v)
             )
+        # when the tagging rules change (emptype.VERSION), re-tag every saved job once
+        row = conn.execute("SELECT value FROM settings WHERE key='emp_tags_version'").fetchone()
+        if not row or row["value"] != str(emptype.VERSION):
+            for r in conn.execute("SELECT id, employment_type, title, description "
+                                  "FROM jobs").fetchall():
+                tags = emptype.classify(r["employment_type"], r["title"], r["description"])
+                conn.execute("UPDATE jobs SET emp_tags=? WHERE id=?",
+                             (emptype.to_db(tags), r["id"]))
+            conn.execute("INSERT INTO settings(key, value) VALUES ('emp_tags_version', ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                         (str(emptype.VERSION),))
         conn.commit()
 
 
@@ -166,8 +218,8 @@ def create_consultant(data: dict) -> dict:
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO consultants(name, email, phone, location, visa_status,
-               linkedin_url, notes, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               linkedin_url, notes, emp_pref, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data.get("name", "").strip(),
                 data.get("email", ""),
@@ -176,6 +228,7 @@ def create_consultant(data: dict) -> dict:
                 data.get("visa_status", ""),
                 data.get("linkedin_url", ""),
                 data.get("notes", ""),
+                _clean_pref(data.get("emp_pref", "")),
                 now_iso(),
             ),
         )
@@ -183,14 +236,21 @@ def create_consultant(data: dict) -> dict:
         return get_consultant(cur.lastrowid)
 
 
+def _clean_pref(v) -> str:
+    """Normalise a consultant's engagement preference to 'c2c,w2,fulltime'."""
+    if isinstance(v, list):
+        v = ",".join(v)
+    return ",".join(emptype.parse_wanted(v or ""))
+
+
 def update_consultant(cid: int, data: dict) -> dict | None:
     fields = ["name", "email", "phone", "location", "visa_status",
-              "linkedin_url", "notes"]
+              "linkedin_url", "notes", "emp_pref"]
     sets, vals = [], []
     for f in fields:
         if f in data:
             sets.append(f"{f}=?")
-            vals.append(data[f])
+            vals.append(_clean_pref(data[f]) if f == "emp_pref" else data[f])
     if sets:
         vals.append(cid)
         with get_conn() as conn:
@@ -252,14 +312,76 @@ def consultants_with_resumes() -> list:
     return out
 
 
+def update_resume_skills(consultant_id: int, skills: list) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE resumes SET skills_json=? WHERE consultant_id=?",
+                     (json.dumps(skills), consultant_id))
+        conn.commit()
+
+
+# ---- learned skills (vocabulary that grows from the resumes we hold) ----
+def list_learned_skills() -> list:
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT skill, source, learned_at FROM learned_skills "
+            "ORDER BY learned_at DESC, skill")]
+
+
+def add_learned_skills(skills: list, source: str = "") -> list:
+    """Insert new skills; returns the ones that were actually new."""
+    new = []
+    with get_conn() as conn:
+        for sk in skills:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO learned_skills(skill, source, learned_at) "
+                "VALUES (?, ?, ?)", (sk, source, now_iso()))
+            if cur.rowcount:
+                new.append(sk)
+        conn.commit()
+    return new
+
+
+def delete_learned_skill(skill: str) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM learned_skills WHERE skill=?", (skill,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+# ---- daily API call budget (protects free-tier keys) ----
+def usage_today(source: str) -> int:
+    day = now_iso()[:10]
+    with get_conn() as conn:
+        r = conn.execute("SELECT hits FROM api_usage WHERE day=? AND source=?",
+                         (day, source)).fetchone()
+        return r["hits"] if r else 0
+
+
+def usage_add(source: str, hits: int) -> None:
+    day = now_iso()[:10]
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO api_usage(day, source, hits) VALUES (?, ?, ?) "
+            "ON CONFLICT(day, source) DO UPDATE SET hits = hits + excluded.hits",
+            (day, source, hits))
+        conn.commit()
+
+
 # ---- jobs ----
 def insert_job(job: dict) -> int | None:
     """Insert a job dict. Returns new id, or None if duplicate."""
+    tags = emptype.to_db(emptype.classify(
+        job.get("employment_type", ""), job.get("title", ""),
+        job.get("description", "")))
     with get_conn() as conn:
-        # fuzzy dedupe: same title+company already present from any source
+        # fuzzy dedupe: same title + company + location already present from
+        # any source. (Location is part of the key: staffing vendors post the
+        # same title in many cities and each is a separate opening.)
         dup = conn.execute(
-            "SELECT id FROM jobs WHERE lower(title)=lower(?) AND lower(company)=lower(?)",
-            (job.get("title", ""), job.get("company", "")),
+            "SELECT id FROM jobs WHERE lower(title)=lower(?) AND "
+            "lower(company)=lower(?) AND lower(location)=lower(?)",
+            (job.get("title", ""), job.get("company", ""),
+             job.get("location", "")),
         ).fetchone()
         if dup:
             return None
@@ -267,8 +389,8 @@ def insert_job(job: dict) -> int | None:
             cur = conn.execute(
                 """INSERT INTO jobs(source, source_id, title, company, location,
                    remote_flag, url, description, posted_at, salary,
-                   employment_type, fetched_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   employment_type, emp_tags, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job.get("source", ""),
                     job.get("source_id", ""),
@@ -281,6 +403,7 @@ def insert_job(job: dict) -> int | None:
                     job.get("posted_at", ""),
                     job.get("salary", ""),
                     job.get("employment_type", ""),
+                    tags,
                     now_iso(),
                 ),
             )
@@ -290,7 +413,15 @@ def insert_job(job: dict) -> int | None:
             return None
 
 
-def list_jobs(source: str = "", q: str = "", limit: int = 50) -> list:
+def _with_tags(row: dict) -> dict:
+    row["emp_tags"] = emptype.from_db(row.get("emp_tags") or "")
+    return row
+
+
+def list_jobs(source: str = "", q: str = "", limit: int = 50,
+              emp: list | None = None, include_unspecified: bool = False) -> list:
+    """emp: employment tags to keep (OR). Jobs with no detectable type are kept
+    only when include_unspecified is true."""
     sql = "SELECT * FROM jobs WHERE 1=1"
     vals: list = []
     if source:
@@ -299,10 +430,16 @@ def list_jobs(source: str = "", q: str = "", limit: int = 50) -> list:
     if q:
         sql += " AND (title LIKE ? OR company LIKE ? OR description LIKE ?)"
         vals += [f"%{q}%"] * 3
+    if emp:
+        conds = ["emp_tags LIKE ?"] * len(emp)
+        vals += [f"%,{t},%" for t in emp]
+        if include_unspecified:
+            conds.append("COALESCE(emp_tags,'')=''")
+        sql += " AND (" + " OR ".join(conds) + ")"
     sql += " ORDER BY fetched_at DESC, id DESC LIMIT ?"
-    vals.append(max(1, min(limit, 500)))
+    vals.append(max(1, min(limit, 1000)))
     with get_conn() as conn:
-        return [dict(r) for r in conn.execute(sql, vals)]
+        return [_with_tags(dict(r)) for r in conn.execute(sql, vals)]
 
 
 def get_job(jid: int) -> dict | None:
@@ -334,6 +471,15 @@ def insert_match(consultant_id: int, job_id: int, score: float,
             return None
 
 
+def update_match(mid: int, score: float, breakdown: dict, missing: list) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            'UPDATE "matches" SET score=?, score_breakdown_json=?, '
+            'missing_skills_json=? WHERE id=?',
+            (score, json.dumps(breakdown), json.dumps(missing), mid))
+        conn.commit()
+
+
 def match_exists(consultant_id: int, job_id: int) -> bool:
     with get_conn() as conn:
         r = conn.execute(
@@ -346,7 +492,8 @@ def match_exists(consultant_id: int, job_id: int) -> bool:
 def list_matches(consultant_id: int | None = None,
                  min_score: float = 0) -> list:
     sql = ('SELECT m.*, j.title AS job_title, j.company, j.location, j.url, '
-           'j.source, j.posted_at, j.salary, c.name AS consultant_name '
+           'j.source, j.posted_at, j.salary, j.employment_type, j.emp_tags, '
+           'j.remote_flag, c.name AS consultant_name '
            'FROM "matches" m JOIN jobs j ON j.id=m.job_id '
            'JOIN consultants c ON c.id=m.consultant_id WHERE m.score >= ?')
     vals: list = [min_score]
@@ -359,6 +506,7 @@ def list_matches(consultant_id: int | None = None,
     for r in rows:
         r["score_breakdown"] = json.loads(r.pop("score_breakdown_json") or "{}")
         r["missing_skills"] = json.loads(r.pop("missing_skills_json") or "[]")
+        _with_tags(r)
     return rows
 
 
@@ -366,15 +514,15 @@ def get_match(mid: int) -> dict | None:
     with get_conn() as conn:
         r = conn.execute(
             'SELECT m.*, j.title AS job_title, j.company, j.location, j.url, '
-            'j.source, j.posted_at, j.salary, j.description AS job_description, '
-            'c.name AS consultant_name '
+            'j.source, j.posted_at, j.salary, j.employment_type, j.emp_tags, '
+            'j.description AS job_description, c.name AS consultant_name '
             'FROM "matches" m JOIN jobs j ON j.id=m.job_id '
             'JOIN consultants c ON c.id=m.consultant_id WHERE m.id=?',
             (mid,),
         ).fetchone()
         if not r:
             return None
-        d = dict(r)
+        d = _with_tags(dict(r))
         d["score_breakdown"] = json.loads(d.pop("score_breakdown_json") or "{}")
         d["missing_skills"] = json.loads(d.pop("missing_skills_json") or "[]")
         res = conn.execute("SELECT raw_text, skills_json FROM resumes "

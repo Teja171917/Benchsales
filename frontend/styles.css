@@ -419,3 +419,31 @@ pre.doc { background: var(--code-bg); }
 :root[data-theme="dark"] input:focus, :root[data-theme="dark"] select:focus, :root[data-theme="dark"] textarea:focus {
   box-shadow: 0 0 0 3px rgba(91, 147, 240, .25);
 }
+/* ---------- employment-type tags & chip toggles (USA market) ---------- */
+.tag {
+  display: inline-block; padding: 1px 8px; margin: 3px 4px 0 0;
+  border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: var(--track, #eef1f6); color: var(--muted); border: 1px solid var(--line);
+}
+.tag-fulltime { background: var(--green-bg); color: #166534; border-color: #bfe3ca; }
+.tag-c2c { background: var(--brand-soft); color: var(--brand-dark); border-color: #c5d9f8; }
+.tag-w2 { background: var(--amber-bg); color: var(--amber); border-color: #f1d9b0; }
+.tag-contract { background: #f3e8ff; color: #6b21a8; border-color: #e1cbfa; }
+.chiprow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip-toggle { cursor: pointer; user-select: none; }
+.chip-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.chip-toggle span {
+  display: inline-block; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid var(--btn-line, var(--line)); background: var(--input-bg, #fff); color: var(--muted);
+  font-size: 13px; font-weight: 600;
+}
+.chip-toggle input:checked + span {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+}
+.chip-toggle input:focus-visible + span { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* dark theme: tag colours */
+:root[data-theme="dark"] .tag-fulltime { background: var(--green-bg); color: var(--green); border-color: #1e4a30; }
+:root[data-theme="dark"] .tag-c2c { background: var(--brand-soft); color: var(--brand-dark); border-color: #2c4272; }
+:root[data-theme="dark"] .tag-w2 { background: var(--amber-bg); color: var(--amber); border-color: #5a4417; }
+:root[data-theme="dark"] .tag-contract { background: #2a1d44; color: #c4a0f5; border-color: #45306b; }

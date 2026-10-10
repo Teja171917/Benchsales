@@ -1,8 +1,11 @@
 """Consultant <-> job scoring for BenchPilot (0-100)."""
+import json
 import re
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
-from . import db
+from . import db, emptype
+from .usa import STATE_ABBR_TO_NAME
 from .skills import extract_skills, requirements_skills
 
 STOPWORDS = {"a", "an", "the", "and", "or", "of", "for", "to", "in", "on",
@@ -13,6 +16,22 @@ STOPWORDS = {"a", "an", "the", "and", "or", "of", "for", "to", "in", "on",
 def _tokens(s: str) -> set[str]:
     toks = set(re.findall(r"[a-z0-9+#.\-]+", (s or "").lower()))
     return {t for t in toks if t not in STOPWORDS and len(t) > 1}
+
+
+_LOC_NOISE = {"usa", "us", "united", "states", "america", "county"}
+
+
+def _loc_tokens(s: str) -> set[str]:
+    """Location words, with state abbreviations spelled out so that
+    "Irvine, CA" and "California, USA" share the token 'california'."""
+    s = s or ""
+    toks = set(_tokens(s))
+    for m in re.finditer(r"\b([A-Z]{2})\b", s):
+        name = STATE_ABBR_TO_NAME.get(m.group(1))
+        if name:
+            toks.discard(m.group(1).lower())
+            toks.update(name.split())
+    return {t for t in toks if t not in _LOC_NOISE}
 
 
 def _jaccard(a: set, b: set) -> float:
@@ -45,14 +64,31 @@ def consultant_title(raw_text: str) -> str:
     return first.split("|")[0].strip()
 
 
+@lru_cache(maxsize=4096)
+def _jd_skills(jd_text: str) -> tuple[frozenset, frozenset]:
+    """Skill extraction is the slow part and is identical for every consultant
+    scored against the same job, so cache it by description text."""
+    jd = frozenset(extract_skills(jd_text))
+    return jd, frozenset(requirements_skills(jd_text)) & jd
+
+
+def emp_compatible(consultant: dict, job_tags: list) -> bool:
+    """A consultant who only takes e.g. W2 should not be matched to a job that
+    explicitly says C2C only. Jobs with no detectable type always pass, and a
+    consultant with no stated preference matches everything."""
+    pref = emptype.parse_wanted(consultant.get("emp_pref") or "")
+    if not pref or not job_tags:
+        return True
+    return bool(set(pref) & set(job_tags))
+
+
 def score(consultant: dict, job: dict) -> dict:
     """consultant: dict with raw_text, skills(list), location.
     job: dict with title, location, remote_flag, description, posted_at.
     Returns {score, breakdown, missing_skills}."""
     resume_skills = set(consultant.get("skills") or [])
     jd_text = job.get("description") or ""
-    jd_skills = set(extract_skills(jd_text))
-    req_skills = requirements_skills(jd_text) & jd_skills
+    jd_skills, req_skills = _jd_skills(jd_text)
 
     # 70% skill overlap (requirements-section skills count 2x)
     possible = 0
@@ -78,7 +114,8 @@ def score(consultant: dict, job: dict) -> dict:
     if remote:
         loc_score = 1.0
     elif consultant.get("location") and job.get("location"):
-        loc_score = _jaccard(_tokens(consultant["location"]), _tokens(job["location"]))
+        loc_score = _jaccard(_loc_tokens(consultant["location"]),
+                            _loc_tokens(job["location"]))
     else:
         loc_score = 0.5
 
@@ -101,25 +138,35 @@ def score(consultant: dict, job: dict) -> dict:
     return {
         "score": score100,
         "breakdown": breakdown,
-        "missing_skills": sorted(jd_skills - resume_skills),
+        "missing_skills": sorted(set(jd_skills) - resume_skills),
     }
 
 
-def run_all(threshold: float | None = None) -> int:
+def run_all(threshold: float | None = None,
+            consultant_id: int | None = None) -> int:
     """Score every consultant with a resume against every job; insert new
-    matches at/above threshold. Returns number of new matches."""
+    matches at/above threshold. Returns number of new matches. Pass
+    consultant_id to score just that one consultant (used right after a
+    resume upload)."""
     if threshold is None:
         try:
             threshold = float(db.get_setting("match_threshold", "60"))
         except ValueError:
             threshold = 60.0
     consultants = db.consultants_with_resumes()
+    if consultant_id is not None:
+        consultants = [c for c in consultants if c["id"] == consultant_id]
     with db.get_conn() as conn:
         jobs = [dict(r) for r in conn.execute("SELECT * FROM jobs")]
+        # one query instead of one connection per (consultant, job) pair
+        existing = {(r["consultant_id"], r["job_id"]) for r in conn.execute(
+            'SELECT consultant_id, job_id FROM "matches"')}
     new = 0
     for c in consultants:
         for j in jobs:
-            if db.match_exists(c["id"], j["id"]):
+            if (c["id"], j["id"]) in existing:
+                continue
+            if not emp_compatible(c, emptype.from_db(j.get("emp_tags") or "")):
                 continue
             r = score(c, j)
             if r["score"] >= threshold:
@@ -127,3 +174,28 @@ def run_all(threshold: float | None = None) -> int:
                                    r["breakdown"], r["missing_skills"]):
                     new += 1
     return new
+
+
+def rescore_existing(consultant_id: int | None = None) -> int:
+    """Recompute the score of matches that already exist (the skill list or a
+    resume changed). Only updates numbers - never deletes a match, because an
+    application may depend on it. Returns how many scores changed."""
+    consultants = {c["id"]: c for c in db.consultants_with_resumes()}
+    with db.get_conn() as conn:
+        jobs = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM jobs")}
+        rows = [dict(r) for r in conn.execute(
+            'SELECT id, consultant_id, job_id, score, score_breakdown_json, '
+            'missing_skills_json FROM "matches"')]
+    changed = 0
+    for m in rows:
+        if consultant_id is not None and m["consultant_id"] != consultant_id:
+            continue
+        c, j = consultants.get(m["consultant_id"]), jobs.get(m["job_id"])
+        if not c or not j:
+            continue
+        r = score(c, j)
+        old_missing = json.loads(m["missing_skills_json"] or "[]")
+        if r["score"] != m["score"] or r["missing_skills"] != old_missing:
+            db.update_match(m["id"], r["score"], r["breakdown"], r["missing_skills"])
+            changed += 1
+    return changed

@@ -1,5 +1,5 @@
 """Adzuna aggregator adapter. Needs free key from developer.adzuna.com."""
-from .common import get, clean
+from .common import get, clean, wanted_emp, CONTRACT_TAGS
 
 NAME = "adzuna"
 LABEL = "Adzuna (aggregator)"
@@ -13,14 +13,20 @@ def fetch(query: dict, settings: dict) -> list[dict]:
     app_id = settings["adzuna_app_id"]
     app_key = settings["adzuna_app_key"]
     jobs: list[dict] = []
+    params = {"app_id": app_id, "app_key": app_key,
+              "what": query.get("title", ""),
+              "where": query.get("location", ""),
+              "results_per_page": 50, "content-type": "application/json"}
+    # Adzuna can't OR filters: narrow to contract roles only when the
+    # recruiter asked for contract types and NOT full-time.
+    want = wanted_emp(settings)
+    if want and "fulltime" not in want and set(want) <= CONTRACT_TAGS:
+        params["contract"] = "1"
+    elif want == ["fulltime"]:
+        params["full_time"] = "1"
     for page in (1, 2):
-        r = get(
-            f"https://api.adzuna.com/v1/api/jobs/us/search/{page}",
-            params={"app_id": app_id, "app_key": app_key,
-                    "what": query.get("title", ""),
-                    "where": query.get("location", ""),
-                    "results_per_page": 50, "content-type": "application/json"},
-        )
+        r = get(f"https://api.adzuna.com/v1/api/jobs/us/search/{page}",
+                params=params)
         r.raise_for_status()
         data = r.json()
         for j in data.get("results", []):
@@ -42,7 +48,9 @@ def fetch(query: dict, settings: dict) -> list[dict]:
                 "description": desc,
                 "posted_at": clean(j.get("created")),
                 "salary": salary,
-                "employment_type": clean(j.get("contract_time") or ""),
+                # contract_time = full_time/part_time, contract_type = permanent/contract
+                "employment_type": " ".join(filter(None, [
+                    clean(j.get("contract_time")), clean(j.get("contract_type"))])),
             })
         if page * 50 >= (data.get("count") or 0):
             break

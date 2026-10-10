@@ -1,8 +1,11 @@
 """URL import: recruiter pastes any job posting URL (LinkedIn, Indeed, Dice,
 company career page); we fetch it and extract title/company/description.
 This is the v1 path for boards that block scraping."""
+import ipaddress
 import re
+import socket
 import uuid
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -21,14 +24,44 @@ def _fallback_text(html: str) -> str:
     return text.strip()
 
 
+def _assert_public(url: str) -> None:
+    """Block server-side requests to private / loopback / link-local hosts
+    (SSRF): when the app is hosted for a team, a pasted URL must not be able
+    to reach the host's internal network or cloud-metadata endpoint."""
+    parts = urlparse(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("only http(s) URLs are allowed")
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port or 443)
+    except socket.gaierror:
+        raise ValueError(f"cannot resolve host: {parts.hostname}")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or
+                ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise ValueError("that address is not a public website")
+
+
+def _fetch(url: str, max_hops: int = 5) -> requests.Response:
+    """GET with manual redirects so every hop is checked by _assert_public."""
+    for _ in range(max_hops + 1):
+        _assert_public(url)
+        resp = requests.get(url, headers=UA, timeout=30, allow_redirects=False)
+        if resp.is_redirect and resp.headers.get("location"):
+            url = urljoin(url, resp.headers["location"])
+            continue
+        resp.raise_for_status()
+        return resp
+    raise ValueError("too many redirects")
+
+
 def import_url(url: str) -> dict:
     url = (url or "").strip()
     if not url:
         raise ValueError("URL is required")
     if not re.match(r"^https?://", url, re.I):
         url = "https://" + url  # tolerate pasted links without a scheme
-    resp = requests.get(url, headers=UA, timeout=30)
-    resp.raise_for_status()
+    resp = _fetch(url)
     html = resp.text
 
     text = ""

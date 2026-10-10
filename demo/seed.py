@@ -12,7 +12,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
-from app import db
+from app import db, usa
 from app import matcher
 from app.skills import extract_skills
 
@@ -117,6 +117,50 @@ Requirements:
         "posted_at": "2026-10-02T14:00:00+00:00", "salary": "$110k - $130k",
         "employment_type": "Full-time",
     },
+    {
+        "source": "seed", "source_id": "seed-7",
+        "title": "Java Full Stack Developer (C2C / W2)", "company": "Lone Star IT Staffing",
+        "location": "Plano, TX", "remote_flag": 0,
+        "url": "https://example.com/jobs/lonestar-java-fullstack",
+        "description": """Java Full Stack Developer - Plano, TX (Hybrid). 12 month contract.
+Open to C2C or W2. No 1099.
+
+Requirements:
+- Java, Spring Boot, microservices, REST API
+- React, JavaScript
+- AWS, Docker, CI/CD with Jenkins
+- PostgreSQL""",
+        "posted_at": "2026-10-06T09:00:00+00:00", "salary": "$60 - $70/hr",
+        "employment_type": "",
+    },
+    {
+        "source": "seed", "source_id": "seed-8",
+        "title": "Python Automation Engineer", "company": "Bayou Tech Solutions",
+        "location": "Remote", "remote_flag": 1,
+        "url": "https://example.com/jobs/bayou-python-automation",
+        "description": """Python Automation Engineer (Remote, USA).
+W2 only - no C2C, no third party. Contract-to-hire.
+
+Requirements:
+- Python, Selenium WebDriver, pytest
+- API testing, Postman
+- Jenkins CI/CD, Git
+- SQL""",
+        "posted_at": "2026-10-07T15:00:00+00:00", "salary": "",
+        "employment_type": "",
+    },
+    {
+        "source": "seed", "source_id": "seed-9",
+        "title": "DevOps Engineer", "company": "Rhine Cloud GmbH",
+        "location": "Berlin, Germany", "remote_flag": 0,
+        "url": "https://example.com/jobs/rhine-devops",
+        "description": """DevOps Engineer - Berlin.
+
+Requirements:
+- Kubernetes, Terraform, AWS, CI/CD""",
+        "posted_at": "2026-10-05T09:00:00+00:00", "salary": "",
+        "employment_type": "Full-time",
+    },
 ]
 
 DEMO_PEOPLE = [
@@ -161,7 +205,9 @@ def main():
             else:
                 print(f"WARNING: missing {rp} — run demo/make_resumes.py first")
 
-    new_jobs = sum(1 for j in SAMPLE_JOBS if db.insert_job(j))
+    us_jobs = usa.filter_us(SAMPLE_JOBS)  # same USA-only rule as the collector
+    print(f"skipping {len(SAMPLE_JOBS) - len(us_jobs)} non-US sample job(s)")
+    new_jobs = sum(1 for j in us_jobs if db.insert_job(j))
     print(f"inserted {new_jobs} new sample jobs")
 
     new_matches = matcher.run_all()

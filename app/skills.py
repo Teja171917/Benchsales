@@ -43,7 +43,7 @@ SKILLS = [
     "service mesh", "istio", "consul", "vault",
     # tools / platforms
     "git", "github", "gitlab", "bitbucket", "svn", "jira", "confluence",
-    "trello", "asana", "slack", "teams", "sharepoint", "servicenow",
+    "trello", "asana", "slack", "microsoft teams", "sharepoint", "servicenow",
     "salesforce", "sap", "oracle ebs", "workday", "peoplesoft", "hubspot",
     "zendesk", "postman", "swagger", "openapi", "insomnia", "figma",
     "adobe xd", "sketch", "photoshop", "illustrator", "vs code",
@@ -57,6 +57,11 @@ SKILLS = [
     "gatling", "k6", "postman", "api testing", "performance testing",
     "load testing", "regression testing", "smoke testing", "uat",
     "test automation", "qa automation", "manual testing",
+    "restassured", "soapui", "allure", "rally", "istqb", "test strategy",
+    "defect management", "test management", "shift-left testing",
+    # ai / llm
+    "claude api", "generative ai", "prompt engineering", "prompt testing",
+    "llm testing", "rag", "vector database", "hugging face",
     # methodologies / practices
     "agile", "scrum", "kanban", "safe", "waterfall", "devops", "sre",
     "site reliability", "code review", "pair programming", "ci", "cd",
@@ -93,7 +98,14 @@ ALIASES = {
     "py": "python",
     "apis": "rest api",
     "ci": "continuous integration",
+    "rest assured": "restassured",
+    "rest-assured": "restassured",
+    "ms teams": "microsoft teams",
+    "gen ai": "generative ai",
+    "genai": "generative ai",
 }
+
+_SKILL_SET = frozenset(SKILLS)
 
 _COMPILED: dict[str, re.Pattern] = {}
 
@@ -114,6 +126,30 @@ def normalize(text: str) -> str:
     return t
 
 
+# Skills learned automatically from the resumes (see app/autolearn.py).
+# They live in the database; this set is a copy kept in memory.
+_LEARNED: frozenset = frozenset()
+
+
+def set_learned(skills) -> bool:
+    """Replace the learned vocabulary. Returns True if it changed."""
+    global _LEARNED
+    new = frozenset(s.strip().lower() for s in skills if s and s.strip())
+    if new == _LEARNED:
+        return False
+    _LEARNED = new
+    return True
+
+
+def learned() -> frozenset:
+    return _LEARNED
+
+
+def is_known(skill: str) -> bool:
+    s = (skill or "").strip().lower()
+    return s in _LEARNED or s in ALIASES or s in _SKILL_SET
+
+
 def extract_skills(text: str) -> list[str]:
     """Return sorted list of canonical skills found in text (case-insensitive)."""
     if not text:
@@ -121,6 +157,9 @@ def extract_skills(text: str) -> list[str]:
     t = normalize(text)
     found: set[str] = set()
     for skill in SKILLS:
+        if _pattern(skill).search(t):
+            found.add(skill)
+    for skill in _LEARNED:
         if _pattern(skill).search(t):
             found.add(skill)
     # aliases

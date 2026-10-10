@@ -83,7 +83,26 @@ def keyword_tailor(raw_text: str, resume_skills: list[str], jd_text: str) -> str
         while j < len(lines) and lines[j].strip() and not re.match(
                 r"^\s*[A-Z][A-Za-z /&]{2,40}:?\s*$", lines[j]):
             j += 1
-        lines[sec_idx:j] = [lines[sec_idx].rstrip() or "Skills", skills_line]
+        section = lines[sec_idx + 1:j]
+        label_re = re.compile(r"^(\s*[^:,]{2,40}:\s*)(\S.*)$")
+        labelled = [ln for ln in section if label_re.match(ln)]
+        non_empty = [ln for ln in section if ln.strip()]
+        if labelled and len(labelled) * 2 >= len(non_empty):
+            # categorised skills ("Languages: Java, Python"): keep the
+            # candidate's own lines and categories, only move the skills this
+            # job asks for to the front of each line.
+            mset0 = set(matched)
+            new_section = []
+            for ln in section:
+                m = label_re.match(ln)
+                if m:
+                    items = [x.strip() for x in m.group(2).split(",") if x.strip()]
+                    items.sort(key=lambda it: not _skill_hit(it, mset0))  # stable
+                    ln = m.group(1) + ", ".join(items)
+                new_section.append(ln)
+            lines[sec_idx + 1:j] = new_section
+        else:
+            lines[sec_idx:j] = [lines[sec_idx].rstrip() or "Skills", skills_line]
     else:
         insert_at = 1 if lines else 0
         lines.insert(insert_at, skills_line)
