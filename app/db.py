@@ -155,6 +155,9 @@ def init_db() -> None:
             conn.execute("ALTER TABLE jobs ADD COLUMN emp_tags TEXT")
         if "emp_pref" not in _columns(conn, "consultants"):
             conn.execute("ALTER TABLE consultants ADD COLUMN emp_pref TEXT DEFAULT ''")
+        if "user_confirmed_skills_json" not in _columns(conn, "tailored_resumes"):
+            conn.execute("ALTER TABLE tailored_resumes "
+                         "ADD COLUMN user_confirmed_skills_json TEXT DEFAULT '[]'")
         # backfill employment tags for jobs saved before tagging existed
         for r in conn.execute("SELECT id, employment_type, title, description "
                               "FROM jobs WHERE emp_tags IS NULL").fetchall():
@@ -558,7 +561,34 @@ def get_tailored(tid: int) -> dict | None:
         d = dict(r)
         d["added_skills_flagged"] = json.loads(
             d.pop("added_skills_flagged_json") or "[]")
+        d["user_confirmed_skills"] = json.loads(
+            d.pop("user_confirmed_skills_json", None) or "[]")
         return d
+
+
+def update_tailored(tid: int, text: str, confirmed: list) -> dict | None:
+    """Replace the tailored text and merge newly user-confirmed skills.
+
+    Confirmed skills are the recruiter's explicit attestation that the
+    candidate has them, so they are removed from `added_skills_flagged`.
+    Returns the updated tailored-resume dict, or None if not found.
+    """
+    with get_conn() as conn:
+        r = conn.execute("SELECT * FROM tailored_resumes WHERE id=?", (tid,)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        prev = set(json.loads(d.get("user_confirmed_skills_json") or "[]"))
+        merged = sorted(prev | set(confirmed))
+        flagged = [s for s in json.loads(d.get("added_skills_flagged_json") or "[]")
+                   if s not in merged]
+        conn.execute(
+            "UPDATE tailored_resumes SET tailored_text=?, "
+            "added_skills_flagged_json=?, user_confirmed_skills_json=? WHERE id=?",
+            (text, json.dumps(flagged), json.dumps(merged), tid),
+        )
+        conn.commit()
+    return get_tailored(tid)
 
 
 # ---- applications ----

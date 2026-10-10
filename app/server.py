@@ -12,12 +12,12 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import autolearn, db, emptype, portals, usa
+from app import autolearn, db, emptype, market, portals, usa
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
 from app import tailor as tailor_mod
-from app.skills import extract_skills
+from app.skills import display_name, extract_skills
 from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, urlimport
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -486,8 +486,55 @@ def api_tailor(mid: int):
     result = tailor_mod.tailor_match(m, settings)
     tid = db.insert_tailored(mid, result["text"], result["tailored_by"],
                              result["added_skills_flagged"])
+    demand = market.demand_map()
+    missing = [{"skill": s, "in_demand": s in demand,
+                "demand_jobs": demand.get(s, 0)}
+               for s in (m.get("missing_skills") or [])]
     return {"id": tid, "tailored_by": result["tailored_by"],
-            "added_skills_flagged": result["added_skills_flagged"]}
+            "added_skills_flagged": result["added_skills_flagged"],
+            "missing_skills": missing, "score": m.get("score")}
+
+
+@app.post("/api/tailored/{tid}/add-skills")
+def api_tailored_add_skills(tid: int, data: dict):
+    """Add recruiter-confirmed missing skills to a tailored resume.
+
+    Body: {"skills": [...], "confirmed": true}. Only skills listed as
+    missing for this match can be added - this is the honesty gate: the
+    recruiter explicitly attests the candidate has them.
+    """
+    t = db.get_tailored(tid)
+    if not t:
+        raise HTTPException(404, "not found")
+    if not (data or {}).get("confirmed"):
+        raise HTTPException(400, "confirm the candidate has these skills first")
+    skills = (data or {}).get("skills") or []
+    if not isinstance(skills, list) or not skills:
+        raise HTTPException(400, "no skills given")
+    m = db.get_match(t["match_id"])
+    allowed = set((m.get("missing_skills") or []) if m else [])
+    allowed |= set(t.get("user_confirmed_skills") or [])
+    clean = []
+    for s in skills:
+        s = (s or "").strip()
+        if s and s in allowed and s not in clean:
+            clean.append(s)
+    if not clean:
+        raise HTTPException(400, "none of these skills are missing for this match")
+    new_text = tailor_mod.add_skills_to_text(
+        t["tailored_text"], [display_name(s) for s in clean])
+    updated = db.update_tailored(tid, new_text, clean)
+    return {"id": tid, "added": clean,
+            "user_confirmed_skills": updated["user_confirmed_skills"],
+            "added_skills_flagged": updated["added_skills_flagged"]}
+
+
+@app.get("/api/market/skills")
+def api_market_skills(days: int = 30, limit: int = 50):
+    """Current market demand: top skills across recent job postings."""
+    days = max(1, min(days, 180))
+    limit = max(1, min(limit, 200))
+    return {"days": days, "skills": market.demand(days, limit)}
 
 
 @app.get("/api/tailored/{tid}")

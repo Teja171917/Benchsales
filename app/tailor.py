@@ -146,6 +146,61 @@ def keyword_tailor(raw_text: str, resume_skills: list[str], jd_text: str) -> str
     return "\n".join(out)
 
 
+def add_skills_to_text(text: str, skills: list[str]) -> str:
+    """Insert user-confirmed skills into the resume's skills section.
+
+    Only call with skills the recruiter explicitly confirmed the candidate
+    has (this is the honesty gate - the function itself does no validation).
+    Categorised lines ("Languages: Java, Python") get the new skills appended
+    to the last labelled line; a plain skills block gets an
+    "Additional skills:" line. Skills already present are skipped.
+    """
+    clean = []
+    for s in skills or []:
+        s = (s or "").strip()
+        if s and s.lower() not in {c.lower() for c in clean}:
+            clean.append(s)
+    if not clean or not text:
+        return text
+
+    label_re = re.compile(r"^(\s*[^:,]{2,40}:\s*)(\S.*)$")
+    lines = text.splitlines()
+    sec_idx = None
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*(technical\s+skills|core\s+skills|skills|technologies|"
+                    r"tech\s+stack)\b\s*:?\s*$", line, re.I):
+            sec_idx = i
+            break
+    if sec_idx is None:
+        lines.insert(1 if lines else 0, "Skills: " + ", ".join(clean))
+        return "\n".join(lines)
+
+    j = sec_idx + 1
+    while j < len(lines) and lines[j].strip() and not re.match(
+            r"^\s*[A-Z][A-Za-z /&]{2,40}:?\s*$", lines[j]):
+        j += 1
+    section = lines[sec_idx + 1:j]
+    present = set()
+    for ln in section:
+        m = label_re.match(ln)
+        if m:
+            present.update(x.strip().lower() for x in m.group(2).split(",") if x.strip())
+    new = [s for s in clean if s.lower() not in present]
+    if not new:
+        return text
+    labelled = [ln for ln in section if label_re.match(ln)]
+    if labelled:
+        idx = section.index(labelled[-1])
+        m = label_re.match(section[idx])
+        items = [x.strip() for x in m.group(2).split(",") if x.strip()]
+        items.extend(new)
+        section[idx] = m.group(1) + ", ".join(items)
+        lines[sec_idx + 1:j] = section
+    else:
+        lines.insert(j, "Additional skills: " + ", ".join(new))
+    return "\n".join(lines)
+
+
 def tailor_match(match: dict, settings: dict) -> dict:
     """Tailor the resume for a match dict (from db.get_match).
     Returns {text, tailored_by, added_skills_flagged}."""

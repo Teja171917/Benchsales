@@ -697,17 +697,34 @@ function diffHtml(orig, tailored) {
 }
 async function tailorModal(mid) {
   openModal(`<h2>Tailoring resume…</h2><div class="muted">Working…</div>`, true);
+  let t;
   try {
-    const t = await api(`/api/matches/${mid}/tailor`, {method: "POST"});
+    t = await api(`/api/matches/${mid}/tailor`, {method: "POST"});
+  } catch (e) {
+    openModal(`<h2>Tailor</h2><div class="errbox">${esc(e.message)}</div>
+      <button class="btn" onclick="document.getElementById('modal-root').innerHTML=''">Close</button>`);
+    return;
+  }
+  async function render() {
     const full = await api(`/api/tailored/${t.id}`);
     const d = diffHtml(full.original_text || "", full.tailored_text || "");
-    const flagged = t.added_skills_flagged || [];
+    const flagged = full.added_skills_flagged || [];
+    const confirmed = full.user_confirmed_skills || [];
+    const missing = (t.missing_skills || []).filter((m) => !confirmed.includes(m.skill));
+    const score = t.score;
     openModal(`
       <div class="row spread"><h2>Tailored resume</h2>
         <span class="badge">${esc(t.tailored_by === "llm" ? "AI tailored" : "keyword tailored")}</span></div>
       ${flagged.length ? `<div class="warnbox"><b>Warning — possible added skills:</b> ${flagged.map(esc).join(", ")}.
         These were detected in the tailored text but are not in the original resume.
         <label class="row" style="margin-top:6px"><input type="checkbox" id="tw-ack"> I acknowledge — these are accurate for the candidate</label></div>` : ""}
+      ${missing.length ? `<div class="missbox"><b>Missing skills for this match${score != null ? ` (${score}%)` : ""}:</b>
+        <div class="muted" style="margin:4px 0 8px">Tick the ones the candidate actually has — they get added to the tailored resume. <span class="hot">🔥</span> = in demand across recent postings.</div>
+        <div>${missing.map((m) => `<label class="chip"><input type="checkbox" class="tw-miss" value="${esc(m.skill)}">${esc(m.skill)}${m.in_demand ? ` <span class="hot" title="${m.demand_jobs} recent postings mention this">🔥</span>` : ""}</label>`).join("")}</div>
+        ${confirmed.length ? `<div class="muted" style="margin-top:8px">Added by you: ${confirmed.map(esc).join(", ")}</div>` : ""}
+        <label class="row" style="margin-top:8px"><input type="checkbox" id="tw-confirm"> I confirm the candidate has the ticked skills</label>
+        <div class="row" style="margin-top:6px"><button class="btn" id="tw-add">Add selected to resume</button></div>
+      </div>` : ""}
       <div class="split">
         <div><h3>Original</h3><pre class="doc">${d.orig}</pre></div>
         <div><h3>Tailored</h3><pre class="doc">${d.tailored}</pre></div>
@@ -724,6 +741,19 @@ async function tailorModal(mid) {
       a.download = "tailored-resume.txt";
       a.click();
     };
+    const addBtn = $("#tw-add");
+    if (addBtn) addBtn.onclick = async () => {
+      const sel = [...document.querySelectorAll(".tw-miss:checked")].map((c) => c.value);
+      const conf = $("#tw-confirm");
+      if (!sel.length) { toast("Tick at least one missing skill.", "err"); return; }
+      if (!conf || !conf.checked) { toast("Please confirm the candidate has these skills.", "err"); return; }
+      try {
+        const r = await api(`/api/tailored/${t.id}/add-skills`,
+          {method: "POST", body: JSON.stringify({skills: sel, confirmed: true})});
+        toast(`Added ${r.added.length} skill${r.added.length === 1 ? "" : "s"} to the resume`, "ok");
+        await render();
+      } catch (e) { toast(e.message, "err"); }
+    };
     $("#tw-queue").onclick = async () => {
       if (flagged.length) {
         const ack = $("#tw-ack");
@@ -736,6 +766,9 @@ async function tailorModal(mid) {
       refreshBadges();
       go("queue");
     };
+  }
+  try {
+    await render();
   } catch (e) {
     openModal(`<h2>Tailor</h2><div class="errbox">${esc(e.message)}</div>
       <button class="btn" onclick="document.getElementById('modal-root').innerHTML=''">Close</button>`);

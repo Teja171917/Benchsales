@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import autolearn, db, emptype, matcher, portals, skills, usa  # noqa: E402
+from app import autolearn, db, emptype, market, matcher, portals, skills, tailor, usa  # noqa: E402
 from app.sources import urlimport  # noqa: E402
 
 
@@ -303,6 +303,14 @@ class SkillsTests(unittest.TestCase):
         self.assertIn("microsoft teams", skills.extract_skills(
             "Daily standups on MS Teams"))
 
+    def test_display_names(self):
+        from app import skills
+        self.assertEqual(skills.display_name("playwright"), "Playwright")
+        self.assertEqual(skills.display_name("ci/cd"), "CI/CD")
+        self.assertEqual(skills.display_name("typescript"), "TypeScript")
+        self.assertEqual(skills.display_name("selenium webdriver"), "Selenium WebDriver")
+        self.assertEqual(skills.display_name("test automation"), "Test Automation")
+
 
 class AutoTests(unittest.TestCase):
     """The 'works without humans' parts: learning, queries, quota, rescoring."""
@@ -410,6 +418,87 @@ class SsrfTests(unittest.TestCase):
                   "http://10.0.0.5/", "http://[::1]/"]:
             with self.assertRaises(ValueError, msg=u):
                 urlimport._assert_public(u)
+
+
+class MarketTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "t.db"
+        db.init_db()
+
+    def tearDown(self):
+        db.DB_PATH = self._old
+        self.tmp.cleanup()
+
+    def job(self, n, desc):
+        return {"source": "t", "source_id": f"m{n}", "title": f"Dev {n}",
+                "company": f"Co{n}", "location": "", "remote_flag": 0,
+                "url": "", "description": desc, "posted_at": "",
+                "salary": "", "employment_type": ""}
+
+    def test_demand_ranks_by_posting_count(self):
+        db.insert_job(self.job(1, "Need Playwright and TypeScript for UI automation"))
+        db.insert_job(self.job(2, "Playwright expert wanted, CI/CD experience"))
+        db.insert_job(self.job(3, "Java backend developer, Spring Boot"))
+        top = market.demand(days=30, limit=10)
+        by_skill = {d["skill"]: d["jobs"] for d in top}
+        self.assertEqual(by_skill.get("playwright"), 2)
+        self.assertEqual(by_skill.get("typescript"), 1)
+        self.assertEqual(top[0]["skill"], "playwright")
+
+    def test_demand_ignores_empty_descriptions(self):
+        db.insert_job(self.job(1, ""))
+        self.assertEqual(market.demand(days=30), [])
+
+
+class AddSkillsTests(unittest.TestCase):
+    def test_categorised_line_gets_new_skills(self):
+        text = ("Jane Doe\n\nTechnical Skills\n"
+                "Languages: Java, Python\n"
+                "Tools: Jenkins, Docker\n"
+                "\nExperience\n- Built stuff.")
+        out = tailor.add_skills_to_text(text, ["Playwright", "TypeScript"])
+        self.assertIn("Tools: Jenkins, Docker, Playwright, TypeScript", out)
+        self.assertIn("Languages: Java, Python", out)
+
+    def test_plain_block_gets_additional_line(self):
+        text = "Jane Doe\n\nSkills\nJava, Python\n\nExperience\n- Built stuff."
+        out = tailor.add_skills_to_text(text, ["Playwright"])
+        self.assertIn("Additional skills: Playwright", out)
+
+    def test_duplicates_skipped(self):
+        text = "Jane Doe\n\nTechnical Skills\nLanguages: Java, Python\n\nExperience\n- Built stuff."
+        out = tailor.add_skills_to_text(text, ["Java", "Playwright", "playwright"])
+        self.assertEqual(out.count("Playwright"), 1)
+        self.assertNotIn("playwright, Playwright", out)
+        # Java was already present -> not added again
+        self.assertEqual(out.count("Java"), 1)
+
+    def test_no_skills_no_change(self):
+        text = "Jane Doe\n\nSkills: Java"
+        self.assertEqual(tailor.add_skills_to_text(text, []), text)
+
+    def test_confirmed_skills_stored_and_unflagged(self):
+        tmp = tempfile.TemporaryDirectory()
+        old = db.DB_PATH
+        db.DB_PATH = Path(tmp.name) / "t.db"
+        try:
+            db.init_db()
+            c = db.create_consultant({"name": "T"})
+            jid = db.insert_job({"source": "t", "source_id": "x1", "title": "Dev",
+                                 "company": "Co", "location": "", "remote_flag": 0,
+                                 "url": "", "description": "Playwright",
+                                 "posted_at": "", "salary": "", "employment_type": ""})
+            mid = db.insert_match(c["id"], jid, 65.0, {}, ["playwright"])
+            tid = db.insert_tailored(mid, "resume text", "keyword", ["playwright"])
+            updated = db.update_tailored(tid, "resume text + playwright", ["playwright"])
+            self.assertEqual(updated["user_confirmed_skills"], ["playwright"])
+            self.assertEqual(updated["added_skills_flagged"], [])
+            self.assertIn("playwright", updated["tailored_text"])
+        finally:
+            db.DB_PATH = old
+            tmp.cleanup()
 
 
 if __name__ == "__main__":

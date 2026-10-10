@@ -408,6 +408,10 @@ table.jobs tbody tr:hover td { background: var(--th-bg); }
 .modal { background: var(--card); }
 pre.doc { background: var(--code-bg); }
 .warnbox { background: var(--amber-bg); border-color: var(--amber); }
+.missbox { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin: 12px 0; font-size: 13px; }
+.missbox .hot { font-size: 12px; }
+label.chip { cursor: pointer; }
+label.chip input { margin-right: 4px; }
 :root[data-theme="dark"] .badge.adzuna { background: #1e3a8a; color: #bfdbfe; }
 :root[data-theme="dark"] .badge.jsearch { background: #14532d; color: #bbf7d0; }
 :root[data-theme="dark"] .badge.remoteok { background: #713f12; color: #fef08a; }

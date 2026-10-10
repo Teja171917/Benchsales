@@ -195,3 +195,58 @@ def requirements_skills(description: str) -> set[str]:
             break
         buf.append(line)
     return set(extract_skills("\n".join(buf)))
+
+
+# Canonical (lowercase) skill -> how it should appear on a resume.
+_DISPLAY_OVERRIDES = {
+    "c#": "C#", "c++": "C++", "ci/cd": "CI/CD", "ci": "CI", "cd": "CD",
+    "t-sql": "T-SQL", "pl/sql": "PL/SQL", "sql server": "SQL Server",
+    "r language": "R", "typescript": "TypeScript", "javascript": "JavaScript",
+    "rest api": "REST API", "restful": "RESTful", "restassured": "RestAssured",
+    "selenium webdriver": "Selenium WebDriver", "testng": "TestNG",
+    "junit": "JUnit", "pytest": "Pytest", "nunit": "NUnit", "xunit": "xUnit",
+    "soapui": "SoapUI", "postgresql": "PostgreSQL", "mysql": "MySQL",
+    "mongodb": "MongoDB", "dynamodb": "DynamoDB", "cosmos db": "Cosmos DB",
+    "github": "GitHub", "gitlab": "GitLab", "bitbucket": "Bitbucket",
+    "azure devops": "Azure DevOps", "microsoft azure": "Microsoft Azure",
+    "google cloud": "Google Cloud", "amazon web services": "Amazon Web Services",
+    "power bi": "Power BI", "material ui": "Material UI", "tailwind css": "Tailwind CSS",
+    "node.js": "Node.js", "vue.js": "Vue.js", "next.js": "Next.js", "nuxt.js": "Nuxt.js",
+    "express.js": "Express.js", ".net": ".NET", ".net core": ".NET Core",
+    "asp.net": "ASP.NET", "asp.net core": "ASP.NET Core",
+    "spring boot": "Spring Boot", "spring mvc": "Spring MVC",
+    "spring security": "Spring Security", "kafka streams": "Kafka Streams",
+    "apache spark": "Apache Spark", "machine learning": "Machine Learning",
+    "deep learning": "Deep Learning", "computer vision": "Computer Vision",
+    "generative ai": "Generative AI", "claude api": "Claude API",
+    "prompt engineering": "Prompt Engineering", "hugging face": "Hugging Face",
+    "openai": "OpenAI", "langchain": "LangChain", "llm": "LLM", "nlp": "NLP",
+    "rag": "RAG", "uat": "UAT", "bdd": "BDD", "tdd": "TDD",
+    "owasp": "OWASP", "iam": "IAM", "vpc": "VPC", "ec2": "EC2", "s3": "S3",
+    "rds": "RDS", "eks": "EKS", "aks": "AKS", "gke": "GKE",
+    "jwt": "JWT", "oauth": "OAuth", "oauth2": "OAuth2", "saml": "SAML",
+    "ldap": "LDAP", "okta": "Okta", "keycloak": "Keycloak",
+    "tcp/ip": "TCP/IP", "ssl": "SSL", "tls": "TLS", "dns": "DNS", "vpn": "VPN",
+    "istqb": "ISTQB", "cpsat": "CPSAT", "safe": "SAFe", "sre": "SRE",
+    "a/b testing": "A/B Testing", "elk": "ELK",
+    "site reliability": "Site Reliability", "trunk based development": "Trunk-Based Development",
+    "k8s": "K8s", "argo cd": "Argo CD",
+    "vs code": "VS Code", "intellij": "IntelliJ", "pycharm": "PyCharm",
+    "visual studio": "Visual Studio", "android studio": "Android Studio",
+    "xcode": "Xcode", "macos": "macOS",
+}
+
+
+def display_name(skill: str) -> str:
+    """How a canonical (lowercase) skill should appear on a resume.
+
+    "playwright" -> "Playwright", "ci/cd" -> "CI/CD". Unknown skills fall
+    back to title-casing.
+    """
+    s = (skill or "").strip()
+    if not s:
+        return s
+    low = s.lower()
+    if low in _DISPLAY_OVERRIDES:
+        return _DISPLAY_OVERRIDES[low]
+    return " ".join(w.capitalize() for w in s.split())
