@@ -176,9 +176,12 @@ async function renderConsultants() {
       <label class="btn primary">Add resumes
         <input type="file" id="c-bulk" accept=".pdf,.docx,.txt" multiple hidden>
       </label>
+      <button class="btn" id="c-add">Add consultant</button>
     </span></div>
-    <div class="muted" id="c-bulkmsg" style="margin-bottom:8px">Tip: press <b>Add resumes</b> and choose the resume files. It reads the name, email and city from each resume, creates the consultant, and starts the skills, job search and matching by itself.</div>
+    <div class="muted" id="c-bulkmsg" style="margin-bottom:8px">Tip: <b>Add resumes</b> takes any number of resumes. The AI reads each one, double-checks it, and adds the consultant. Only resumes it is unsure about are marked <b>Needs a quick check</b>.</div>
     <div id="c-list" class="grid">${skelCards(3)}</div>`;
+  $("#c-add").onclick = () => consultantModal(null);
+  $("#c-add").onclick = () => consultantModal(null);
   $("#c-bulk").onchange = async (e) => {
     const files = Array.from(e.target.files || []);
     const box = $("#c-bulkmsg");
@@ -198,7 +201,8 @@ async function renderConsultants() {
     }
     const lines = done.map((d) => `${d.created ? "Added" : "Updated"} <b>${esc(d.name)}</b> — ${d.skills.length} skills`
       + (d.learned_skills.length ? `, learned ${d.learned_skills.length} new` : "")
-      + `, ${d.new_matches} new matches`);
+      + `, ${d.new_matches} new matches`
+      + (d.needs_check ? ` — <b>needs a quick check</b>: ${esc((d.check_notes || []).join("; "))}` : ""));
     const html = (lines.length ? `<div class="okbox">${lines.join("<br>")}<br>Searching for jobs for these roles now…</div>` : "")
       + (failed.length ? `<div class="errbox">${failed.map(esc).join("<br>")}</div>` : "");
     refreshBadges();
@@ -214,6 +218,9 @@ async function renderConsultants() {
           <button class="btn" data-edit="${c.id}">Edit</button>
           <button class="btn danger" data-del="${c.id}">Remove</button>
         </span></div>
+      ${c.needs_check ? `<div class="errbox" style="margin:6px 0"><b>Needs a quick check</b>${c.check_notes ? ": " + esc(c.check_notes) : ""}
+        <div style="margin-top:6px"><button class="btn" data-checked="${c.id}">Looks right</button>
+        <button class="btn" data-edit="${c.id}">Fix it</button></div></div>` : ""}
       <div class="muted">${esc(c.location)}${c.visa_status ? " · " + esc(c.visa_status) : ""}</div>
       <div class="muted">Open to: ${c.emp_pref ? c.emp_pref.split(",").map((t) => esc(EMP_LABEL[t] || t)).join(", ") : "any engagement type"}</div>
       <div class="muted">${esc(c.email)}${c.phone ? " · " + esc(c.phone) : ""}</div>
@@ -229,11 +236,16 @@ async function renderConsultants() {
         </label>
         <span class="muted" data-uploadmsg="${c.id}"></span>
       </div>
-    </div>`).join("") || `<div class="card muted">No consultants yet. Press <b>Add resumes</b> above and choose the resume files.</div>`;
+    </div>`).join("") || `<div class="card muted">No consultants yet. Press Add resumes (or Add consultant) above.</div>`;
 
   $$("[data-edit]", el).forEach((b) => b.onclick = async () => {
     const c = await api(`/api/consultants/${b.dataset.edit}`);
     consultantModal(c);
+  });
+  $$("[data-checked]", el).forEach((b) => b.onclick = async () => {
+    await api(`/api/consultants/${b.dataset.checked}/checked`, {method: "POST"});
+    toast("Marked as checked", "ok");
+    renderConsultants();
   });
   $$("[data-del]", el).forEach((b) => b.onclick = async () => {
     if (!confirm("Remove this consultant and their resume, matches and applications?")) return;
@@ -928,7 +940,7 @@ async function renderSettings() {
         <label>Tailor resumes for matches of</label><input type="number" id="s-tcut" min="30" max="100" value="${esc(s.tailor_cutoff || "65")}" placeholder="65">
         <label>Max drafts per day</label><input type="number" id="s-tmax" min="1" max="50" value="${esc(s.tailor_max_per_run || "10")}" placeholder="10">
       </div>
-      <div class="muted">Keys are stored on this machine only and shown masked. Without an LLM key, tailoring uses the built-in keyword method.</div>
+      <div class="muted">Keys are stored on this machine only and shown masked. The LLM is also used to read resumes. Resume text is sent to that AI provider. Without an LLM key, tailoring and resume reading use the built-in simple methods and more resumes are marked "Needs a quick check".</div>
     </div>
     <div class="card"><h3>Resume folder (Google Drive)</h3>
       <div class="muted" style="margin-bottom:8px">Put the resumes in one Google Drive folder and share it as "Anyone with the link can view". BenchPilot reads the folder by itself and adds every new resume as a consultant. Only files directly inside that folder are read.</div>

@@ -858,5 +858,124 @@ class ResumeImportTests(unittest.TestCase):
         self.assertEqual(r["waiting"], 2)
 
 
+class ResumeAiTests(unittest.TestCase):
+    """AI-checked resume reading (the AI call is faked)."""
+    TEXT = ("SHARAN MURALI\nSenior QA Test Manager | Test Lead\n"
+            "sharmurali9@gmail.com | +1 (714) 860-2332 | Irvine, CA\n\nSUMMARY\nQA leader.\n")
+    KEY = {"llm_base_url": "http://x", "llm_api_key": "k", "llm_model": "m"}
+
+    def setUp(self):
+        from app import resume_ai
+        self.ra = resume_ai
+        self._orig = resume_ai.ai_extract
+
+    def tearDown(self):
+        self.ra.ai_extract = self._orig
+
+    def fake(self, **kw):
+        base = {"name": "Sharan Murali", "email": "sharmurali9@gmail.com",
+                "phone": "+1 (714) 860-2332", "location": "Irvine, CA",
+                "job_title": "Senior QA Test Manager", "confidence": "high"}
+        base.update(kw)
+        self.ra.ai_extract = lambda text, settings: base
+
+    def test_good_answer_needs_no_check(self):
+        self.fake()
+        r = self.ra.read_contact(self.TEXT, "Sharan.docx", self.KEY)
+        self.assertFalse(r["needs_check"])
+        self.assertEqual(r["info"]["name"], "Sharan Murali")
+        self.assertTrue(r["used_ai"])
+
+    def test_invented_email_is_thrown_away(self):
+        self.fake(email="sharan@invented.com")
+        r = self.ra.read_contact(self.TEXT, "Sharan.docx", self.KEY)
+        self.assertEqual(r["info"]["email"], "sharmurali9@gmail.com")   # kept the real one
+
+    def test_invented_name_is_thrown_away(self):
+        self.fake(name="John Smith")
+        r = self.ra.read_contact(self.TEXT, "Sharan.docx", self.KEY)
+        self.assertEqual(r["info"]["name"], "Sharan Murali")
+
+    def test_low_confidence_is_flagged(self):
+        self.fake(confidence="low")
+        r = self.ra.read_contact(self.TEXT, "Sharan.docx", self.KEY)
+        self.assertTrue(r["needs_check"])
+        self.assertTrue(any("not sure" in n for n in r["notes"]))
+
+    def test_name_disagreement_is_flagged(self):
+        self.fake(name="Sharan Murali Test")      # also in the text start? no: squash differs
+        r = self.ra.read_contact(self.TEXT, "Sharan.docx", self.KEY)
+        self.assertEqual(r["info"]["name"], "Sharan Murali")     # unsupported -> rules value
+
+    def test_one_word_name_above_contact_line(self):
+        self.ra.ai_extract = lambda text, settings: None
+        t = ("RAJESWARI\n281-627-6787 | rajisplmtc@gmail.com\nPROFESSIONAL SUMMARY\n"
+             "Teamcenter PLM professional.\nApplication Support\nDevelopment\n")
+        r = self.ra.read_contact(t, "Rajeswari_TC_PLM_Resume.pdf", {})
+        self.assertEqual(r["info"]["name"], "Rajeswari")      # not "Application Support"
+        self.assertTrue(r["needs_check"])
+        self.assertTrue(any("only one name" in n for n in r["notes"]))
+
+    def test_no_city_is_not_a_mistake(self):
+        self.ra.ai_extract = lambda text, settings: None
+        t = "SHARAN MURALI\nQA Manager\nsharmurali9@gmail.com | +1 (714) 860-2332\n"
+        self.assertFalse(self.ra.read_contact(t, "x.docx", {})["needs_check"])
+
+    def test_without_ai_rules_are_checked_and_flagged_when_weak(self):
+        self.ra.ai_extract = lambda text, settings: None
+        ok = self.ra.read_contact(self.TEXT, "Sharan.docx", {})
+        self.assertFalse(ok["needs_check"])
+        self.assertFalse(ok["used_ai"])
+        weak = self.ra.read_contact("Java developer\nskills: java", "x.pdf", {})
+        self.assertTrue(weak["needs_check"])
+        self.assertIn("no valid email found", weak["notes"])
+
+    def test_bad_ai_call_falls_back_to_rules(self):
+        self.ra.ai_extract = self._orig
+        import requests as rq
+        old = rq.post
+        rq.post = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down"))
+        try:
+            r = self.ra.read_contact(self.TEXT, "Sharan.docx", self.KEY)
+        finally:
+            rq.post = old
+        self.assertFalse(r["used_ai"])
+        self.assertEqual(r["info"]["email"], "sharmurali9@gmail.com")
+
+    def test_json_in_code_fence_is_read(self):
+        self.ra.ai_extract = self._orig
+        import requests as rq
+        class R:
+            def raise_for_status(self): pass
+            def json(self):
+                return {"choices": [{"message": {"content":
+                    '```json\n{"name":"Sharan Murali","email":"sharmurali9@gmail.com",'
+                    '"phone":"","location":"Irvine, CA","job_title":"QA","confidence":"high"}\n```'}}]}
+        old = rq.post
+        rq.post = lambda *a, **k: R()
+        try:
+            got = self.ra.ai_extract(self.TEXT, self.KEY)
+        finally:
+            rq.post = old
+        self.assertEqual(got["email"], "sharmurali9@gmail.com")
+
+    def test_flag_is_stored_and_cleared(self):
+        tmp = tempfile.TemporaryDirectory()
+        old = db.DB_PATH
+        db.DB_PATH = Path(tmp.name) / "c.db"
+        try:
+            db.init_db()
+            c = db.create_consultant({"name": "A B"})
+            db.set_consultant_check(c["id"], True, ["no valid email found", "no city found"])
+            row = db.get_consultant(c["id"])
+            self.assertEqual((row["needs_check"], row["check_notes"]),
+                             (1, "no valid email found; no city found"))
+            db.set_consultant_check(c["id"], False, "")
+            self.assertEqual(db.get_consultant(c["id"])["needs_check"], 0)
+        finally:
+            db.DB_PATH = old
+            tmp.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()

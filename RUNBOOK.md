@@ -176,3 +176,10 @@ Still needs a person: changing the code, and keeping the app awake. A free Repli
 4. From then on the site checks the folder about every hour. Each new or changed resume creates/updates the consultant (name, email, city from the resume), then skills, job search, matching and the agents follow.
 
 Notes: only files directly inside the folder are read (PDF, Word, text, Google Docs); subfolders are skipped. Nothing is changed or deleted in Drive. Up to 25 files are read per check (the rest on the next one). A file that cannot be read is reported once and not retried until it changes. Resumes stay in this app's database only - never put real resumes in the GitHub repo.
+
+## AI-checked resume reading (Add resumes)
+
+- **Add resumes** takes any number of files. For each one the AI (the LLM set in Settings) reads the name, email, phone and city. Plain code then double-checks every value against the resume text: a value that is not literally in the resume is thrown away. The AI only reads; it never writes into a resume.
+- A consultant gets **Needs a quick check** only when a check fails (no valid email, name not confirmed, only one name found, AI unsure, AI and rule reader disagree). The card has **Looks right** and **Fix it** buttons. Saving an edit also clears the flag.
+- No AI key? The same checks run on the simple rule reader, so more resumes are flagged. The resume text is sent to the AI provider when a key is set - tell the team before using real resumes.
+- The Google Drive folder import (Settings) uses the same reader.

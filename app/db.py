@@ -184,6 +184,9 @@ def init_db() -> None:
         if "user_confirmed_skills_json" not in _columns(conn, "tailored_resumes"):
             conn.execute("ALTER TABLE tailored_resumes "
                          "ADD COLUMN user_confirmed_skills_json TEXT DEFAULT '[]'")
+        if "needs_check" not in _columns(conn, "consultants"):
+            conn.execute("ALTER TABLE consultants ADD COLUMN needs_check INTEGER DEFAULT 0")
+            conn.execute("ALTER TABLE consultants ADD COLUMN check_notes TEXT DEFAULT ''")
         if "compliance_flag" not in _columns(conn, "matches"):
             conn.execute('ALTER TABLE "matches" ADD COLUMN compliance_flag INTEGER DEFAULT 0')
         # backfill employment tags for jobs saved before tagging existed
@@ -265,6 +268,15 @@ def create_consultant(data: dict) -> dict:
         )
         conn.commit()
         return get_consultant(cur.lastrowid)
+
+
+def set_consultant_check(cid: int, needs_check: bool, notes=None) -> None:
+    """Mark a consultant created from a resume as 'needs a quick check' (or clear it)."""
+    text = "; ".join(notes) if isinstance(notes, list) else (notes or "")
+    with get_conn() as conn:
+        conn.execute("UPDATE consultants SET needs_check=?, check_notes=? WHERE id=?",
+                     (1 if needs_check else 0, text[:500], cid))
+        conn.commit()
 
 
 def _clean_pref(v) -> str:

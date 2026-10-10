@@ -2,6 +2,7 @@
 consultant can be created from the resume file alone."""
 import re
 
+from .skills import extract_skills
 from .usa import STATE_ABBR_TO_NAME
 
 _EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
@@ -49,11 +50,30 @@ def parse_contact(text: str, filename: str = "") -> dict:
     m = _PHONE.search(head)
     phone = m.group(0).strip() if m else ""
     name = ""
-    for ln in lines[:6]:
+    # the name sits above the first line with an email / phone number
+    first_contact = next((i for i, ln in enumerate(lines[:8])
+                          if _EMAIL.search(ln) or _PHONE.search(ln)), None)
+    window = lines[:first_contact + 1] if first_contact is not None else lines[:6]
+    for ln in window[:6]:
         cand = _clean_name(ln)
         if _looks_like_name(cand):
             name = _nice(cand)
             break
+    if not name and first_contact is not None:
+        # a one-word name on its own line right above the contact line
+        # ("RAJESWARI" / "281-627-6787 | raji@mail.com")
+        for ln in window[:first_contact][:4]:
+            cand = _clean_name(ln)
+            if (re.fullmatch(r"[A-Za-z][A-Za-z.'\-]{2,24}", cand)
+                    and not _NOT_NAME.search(cand) and not extract_skills(cand)):
+                name = _nice(cand)
+                break
+    if not name:
+        for ln in lines[:6]:
+            cand = _clean_name(ln)
+            if _looks_like_name(cand):
+                name = _nice(cand)
+                break
     if not name:
         name = name_from_filename(filename)
     location = ""

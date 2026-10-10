@@ -16,7 +16,7 @@ from app import autolearn, contact as contact_mod, db, emptype, market, portals,
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
-from app import resume_import
+from app import resume_ai, resume_import
 from app import tailor as tailor_mod
 from app.skills import display_name, extract_skills
 from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, urlimport
@@ -274,7 +274,17 @@ def api_update_consultant(cid: int, data: dict):
     c = db.update_consultant(cid, data)
     if not c:
         raise HTTPException(404, "consultant not found")
-    return c
+    db.set_consultant_check(cid, False, "")   # a person edited it: no longer in doubt
+    return db.get_consultant(cid)
+
+
+@app.post("/api/consultants/{cid}/checked")
+def api_consultant_checked(cid: int):
+    """A person looked at a resume the AI was unsure about and says it is right."""
+    if not db.get_consultant(cid):
+        raise HTTPException(404, "consultant not found")
+    db.set_consultant_check(cid, False, "")
+    return {"ok": True}
 
 
 @app.delete("/api/consultants/{cid}")
@@ -368,7 +378,8 @@ def _auto_resume(filename: str, data: bytes, kick: bool = True) -> dict:
                  "password-protected); try saving it again as .docx or .pdf")
     if not text:
         raise HTTPException(400, "could not extract text from file")
-    info = contact_mod.parse_contact(text, filename)
+    read = resume_ai.read_contact(text, filename, db.get_settings())
+    info = read["info"]
     existing = None
     for c in db.list_consultants():
         if info["email"] and (c.get("email") or "").lower() == info["email"].lower():
@@ -386,10 +397,14 @@ def _auto_resume(filename: str, data: bytes, kick: bool = True) -> dict:
                 if k != "name" and v and not (c.get(k) or "").strip()}
         if fill:
             c = db.update_consultant(c["id"], fill)
+    if read["needs_check"]:
+        db.set_consultant_check(c["id"], True, read["notes"])
     r = _ingest_resume(c["id"], filename, data, kick=bool(kick))
     r.pop("text", None)
     r.update(consultant_id=c["id"], name=c["name"], created=created,
-             email=c.get("email", ""), location=c.get("location", ""))
+             email=c.get("email", ""), location=c.get("location", ""),
+             needs_check=read["needs_check"], check_notes=read["notes"],
+             used_ai=read["used_ai"])
     return r
 
 
