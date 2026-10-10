@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import autolearn, db, emptype, market, matcher, office, portals, skills, tailor, usa  # noqa: E402
+from app import autolearn, contact, db, emptype, market, matcher, office, portals, skills, tailor, usa  # noqa: E402
 from app.sources import urlimport  # noqa: E402
 
 
@@ -622,13 +622,21 @@ class OfficeAgentsTests(unittest.TestCase):
             self._job(f"Playwright QA {i}", "Senior QA Automation with Playwright.")
         got = office._market_analyst(db.get_settings())
         self.assertTrue(got["actions"], "expected a query-expansion action")
-        queries = json.loads(db.get_setting("search_queries"))
+        queries = json.loads(db.get_setting("office_expanded_queries"))
         titles = [q["title"].lower() for q in queries]
         self.assertTrue(any("playwright" in t for t in titles))
+        # the typed queries are left alone
+        self.assertEqual(json.loads(db.get_setting("search_queries")),
+                         db.DEFAULT_SEARCH_QUERIES)
+        # the collector really searches for it, even with many consultants
+        db.set_setting("max_queries", "3")
+        qs = autolearn.queries_for_run(db.get_settings())
+        self.assertTrue(any("playwright" in q["title"].lower() for q in qs))
+        self.assertLessEqual(len(qs), 3)
         # second run must not duplicate the query
         n = len(queries)
         office._market_analyst(db.get_settings())
-        self.assertEqual(len(json.loads(db.get_setting("search_queries"))), n)
+        self.assertEqual(len(json.loads(db.get_setting("office_expanded_queries"))), n)
 
     def test_watchdog_leaves_followup_note_once(self):
         c = self._consultant()
@@ -665,6 +673,98 @@ class OfficeAgentsTests(unittest.TestCase):
         self.assertEqual(set(br["agents"].keys()),
                          {"scout", "tailor", "watchdog",
                           "market_analyst", "outreach", "compliance"})
+
+    # ---- fixes added on top of Autopilot ----
+    def _match(self, cid, title, score, missing=(), company="Co"):
+        jid = db.insert_job({"source": "t", "source_id": title, "title": title,
+                             "company": company, "location": "", "remote_flag": 0,
+                             "url": "", "description": "Requirements: Java, Selenium, Kafka",
+                             "posted_at": "", "salary": "", "employment_type": ""})
+        return db.insert_match(cid, jid, score, {}, list(missing))
+
+    def test_tailor_cutoff_setting_and_potential_score(self):
+        c = self._consultant()
+        self._match(c["id"], "A", 66.0, ["kafka"])
+        self._match(c["id"], "B", 50.0)
+        got = office._tailor(db.get_settings())
+        self.assertEqual((got["cutoff"], got["drafted"]), (65, 1))
+        d = got["drafts"][0]
+        self.assertEqual(d["missing"], ["kafka"])
+        self.assertGreater(d["potential_score"], d["score"])
+        db.set_setting("tailor_cutoff", "40")
+        db.set_setting("tailor_max_per_run", "1")
+        self.assertEqual(office._tailor(db.get_settings())["drafted"], 1)  # cap holds
+
+    def test_quarantined_matches_get_no_drafts(self):
+        c = self._consultant()
+        mid = self._match(c["id"], "A", 90.0)
+        db.set_compliance_flag(mid, 1)
+        self.assertEqual(office._tailor(db.get_settings())["drafted"], 0)
+        self.assertEqual(office._outreach(db.get_settings())["drafted"], 0)
+
+    def test_compliance_runs_before_drafting(self):
+        c = db.create_consultant({"name": "Priya Nair", "emp_pref": "c2c"})
+        db.upsert_resume(c["id"], "r.txt", self.RESUME, skills.extract_skills(self.RESUME))
+        jid = db.insert_job({"source": "t", "source_id": "w2", "title": "QA W2",
+                             "company": "Co", "location": "", "remote_flag": 0,
+                             "url": "", "description": "W2 only. Selenium Java",
+                             "posted_at": "", "salary": "", "employment_type": ""})
+        mid = db.insert_match(c["id"], jid, 90.0, {}, [])
+        with db.get_conn() as conn:
+            conn.execute("UPDATE jobs SET emp_tags=',w2,' WHERE id=?", (jid,))
+            conn.commit()
+        br = office.run_office()["agents"]
+        self.assertEqual(br["compliance"]["issues"], 1)
+        self.assertEqual(br["tailor"]["drafted"], 0)      # quarantined first
+        self.assertEqual(br["outreach"]["drafted"], 0)
+
+    def test_scout_looks_back_past_a_sleep_gap(self):
+        c = self._consultant()
+        self._match(c["id"], "A", 70.0)
+        with db.get_conn() as conn:
+            conn.execute('UPDATE "matches" SET created_at=?', ("2020-01-02T00:00:00+00:00",))
+            conn.commit()
+        self.assertEqual(office.run_office()["agents"]["scout"]["new_matches"], 0)
+        db.set_setting("office_last_run_at", "2020-01-01T00:00:00+00:00")
+        self.assertEqual(office.run_office()["agents"]["scout"]["new_matches"], 1)
+
+    def test_run_and_store_marks_day_done(self):
+        self._consultant()
+        office.run_and_store()
+        self.assertTrue(db.get_setting("office_last_run_date"))
+        self.assertTrue(db.get_setting("office_last_run_at"))
+
+    def test_watchdog_bad_date_is_not_stale(self):
+        c = self._consultant()
+        mid = self._match(c["id"], "A", 70.0)
+        aid = db.queue_application(mid)["id"]
+        with db.get_conn() as conn:
+            conn.execute("UPDATE applications SET updated_at='garbage' WHERE id=?", (aid,))
+            conn.commit()
+        self.assertEqual(office._watchdog(db.get_settings())["stale"], 0)
+
+
+
+class ContactTests(unittest.TestCase):
+    def test_header_is_read(self):
+        c = contact.parse_contact(
+            "SHARAN MURALI\nSenior QA Test Manager | Test Lead\n"
+            "sharmurali9@gmail.com | +1 (714) 860-2332\nSUMMARY\nx", "a.docx")
+        self.assertEqual((c["name"], c["email"], c["phone"]),
+                         ("Sharan Murali", "sharmurali9@gmail.com", "+1 (714) 860-2332"))
+        c = contact.parse_contact(
+            "Ravi Kumar\nJava Full Stack Developer\n"
+            "Dallas, TX | ravi.k@mail.com | (469) 555-0123", "r.pdf")
+        self.assertEqual((c["name"], c["location"]), ("Ravi Kumar", "Dallas, TX"))
+
+    def test_name_falls_back_to_file_name(self):
+        c = contact.parse_contact("RESUME\nSenior Java Developer\nJava", "Priya_Sharma_CV_final.pdf")
+        self.assertEqual(c["name"], "Priya Sharma")
+        self.assertEqual(contact.parse_contact("", "")["name"], "New consultant")
+
+    def test_job_title_is_not_a_name(self):
+        c = contact.parse_contact("Senior Java Developer\nJane Doe\n", "x.pdf")
+        self.assertEqual(c["name"], "Jane Doe")
 
 
 if __name__ == "__main__":

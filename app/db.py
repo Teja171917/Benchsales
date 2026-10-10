@@ -33,6 +33,10 @@ DEFAULT_SETTINGS = {
     "auto_learn_skills": "1",
     # Adzuna's default key allows 250 calls/day and 2,500/month; stay under it
     "adzuna_daily_budget": "80",
+    # Agent Office / Tailor: draft a tailored resume for matches at/above
+    # this score (drafts only; a person confirms any added skill)
+    "tailor_cutoff": "65",
+    "tailor_max_per_run": "10",
     "search_queries": json.dumps(DEFAULT_SEARCH_QUERIES),
     "office_autopilot": "1",
     "enabled_sources": json.dumps(DEFAULT_ENABLED_SOURCES),

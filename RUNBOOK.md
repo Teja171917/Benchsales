@@ -158,3 +158,12 @@ While the app is running it looks after itself:
 - **Free-key safety.** Adzuna's free key allows 250 calls/day and 2,500/month. The app counts its calls, stays under "Adzuna calls per day" (default 80) and slows the schedule down when needed.
 
 Still needs a person: changing the code, and keeping the app awake. A free Replit app can sleep when nobody visits; an always-on plan (or a small server) keeps the schedule running 24/7.
+
+## Agent fixes and the AI resume update
+
+- **Compliance runs first** now, so Tailor and Outreach never draft for a match that was just quarantined. Quarantined matches are skipped by both.
+- The Office runs once a day **after** the job refresh. If the app slept for more than a day, Scout looks back to the last run.
+- **Market Analyst** queries are kept in their own list and the collector always reserves room for the newest two, so they are really searched (before, they could be squeezed out by the consultants' own searches).
+- **Tailor** drafts for matches at or above the score in Settings (default **65**, **10 drafts a day**). Each draft shows what the score could become if a person confirms the missing skills (for example `70.7 -> 82.3`). Agents never add a skill themselves.
+- With no AI key the draft only re-orders skills and bullets. For real AI rewriting fill the three **LLM** fields in Settings. The AI is told never to add skills, employers or dates.
+- **Add resumes** (Consultants tab): choose many resume files at once; each creates or updates the consultant from the name, email and city in the resume, then skills, job search and matching start by themselves.

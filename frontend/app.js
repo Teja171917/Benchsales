@@ -172,9 +172,42 @@ document.addEventListener("keydown", (e) => {
 async function renderConsultants() {
   const el = $("#tab-consultants");
   el.innerHTML = `<div class="row spread"><h2>Consultants</h2>
-    <button class="btn primary" id="c-add">Add consultant</button></div>
+    <span class="row">
+      <label class="btn primary">Add resumes
+        <input type="file" id="c-bulk" accept=".pdf,.docx,.txt" multiple hidden>
+      </label>
+      <button class="btn" id="c-add">Add consultant</button>
+    </span></div>
+    <div class="muted" id="c-bulkmsg" style="margin-bottom:8px">Tip: <b>Add resumes</b> reads the name, email and city from each resume, creates the consultant, and starts the skills, job search and matching by itself.</div>
     <div id="c-list" class="grid">${skelCards(3)}</div>`;
   $("#c-add").onclick = () => consultantModal(null);
+  $("#c-bulk").onchange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    const box = $("#c-bulkmsg");
+    if (!files.length) return;
+    const done = [], failed = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      box.textContent = `Reading resume ${i + 1} of ${files.length}: ${f.name} …`;
+      const fd = new FormData();
+      fd.append("file", f);
+      try {
+        const r = await fetch(`/api/resumes/auto?kick=${i === files.length - 1 ? 1 : 0}`, {method: "POST", body: fd});
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || "upload failed");
+        done.push(d);
+      } catch (err) { failed.push(`${f.name}: ${err.message}`); }
+    }
+    const lines = done.map((d) => `${d.created ? "Added" : "Updated"} <b>${esc(d.name)}</b> — ${d.skills.length} skills`
+      + (d.learned_skills.length ? `, learned ${d.learned_skills.length} new` : "")
+      + `, ${d.new_matches} new matches`);
+    const html = (lines.length ? `<div class="okbox">${lines.join("<br>")}<br>Searching for jobs for these roles now…</div>` : "")
+      + (failed.length ? `<div class="errbox">${failed.map(esc).join("<br>")}</div>` : "");
+    refreshBadges();
+    await renderConsultants();   // redraw the list, then show the summary
+    const b2 = $("#c-bulkmsg");
+    if (b2) b2.innerHTML = html;
+  };
   const list = await api("/api/consultants");
   $("#c-list").innerHTML = list.map((c) => `
     <div class="card">
@@ -894,6 +927,8 @@ async function renderSettings() {
         <label>LLM base URL</label><input type="text" id="s-llmurl" value="${esc(s.llm_base_url || "")}" placeholder="https://api.openai.com/v1">
         <label>LLM API key</label><input type="password" id="s-llmkey" value="${esc(s.llm_api_key || "")}" placeholder="${s.llm_api_key ? "saved (hidden)" : ""}">
         <label>LLM model</label><input type="text" id="s-llmmodel" value="${esc(s.llm_model || "")}" placeholder="gpt-4o-mini">
+        <label>Tailor resumes for matches of</label><input type="number" id="s-tcut" min="30" max="100" value="${esc(s.tailor_cutoff || "65")}" placeholder="65">
+        <label>Max drafts per day</label><input type="number" id="s-tmax" min="1" max="50" value="${esc(s.tailor_max_per_run || "10")}" placeholder="10">
       </div>
       <div class="muted">Keys are stored on this machine only and shown masked. Without an LLM key, tailoring uses the built-in keyword method.</div>
     </div>
@@ -990,6 +1025,8 @@ async function renderSettings() {
       llm_base_url: $("#s-llmurl").value.trim(),
       llm_api_key: $("#s-llmkey").value,
       llm_model: $("#s-llmmodel").value.trim(),
+      tailor_cutoff: $("#s-tcut").value.trim() || "65",
+      tailor_max_per_run: $("#s-tmax").value.trim() || "10",
       search_queries: qs,
       enabled_sources: $$("[data-src]").filter((c) => c.checked).map((c) => c.dataset.src),
       match_threshold: $("#s-thr").value,
@@ -1090,7 +1127,7 @@ async function renderOverview() {
 /* ================= AGENT OFFICE ================= */
 const AGENT_INFO = {
   scout: {name: "Scout", desc: "Watches the board for fresh matches above your threshold, grouped per consultant."},
-  tailor: {name: "Tailor", desc: "Pre-drafts tailored resumes for top matches (score 85+). Drafts only — flagged skills need your review before anything is queued."},
+  tailor: {name: "Tailor", desc: "Pre-drafts tailored resumes for good matches (score set in Settings, default 65+). Drafts only — added skills need a person to confirm them before anything is queued."},
   watchdog: {name: "Watchdog", desc: "Flags pipeline going cold. On autopilot it also leaves follow-up reminders on stale applications."},
   market_analyst: {name: "Market Analyst", desc: "Per-consultant demand briefing from live postings. On autopilot it adds search queries for hot skills the bench doesn't cover."},
   outreach: {name: "Outreach", desc: "Drafts submission emails for top matches (score 80+). Drafts only — a human always sends."},
@@ -1207,13 +1244,15 @@ async function renderOffice() {
         <div><b>${esc(d.job_title)}</b> <span class="muted">· ${esc(d.company)} · for ${esc(d.consultant_name)} · score ${d.score}</span>
           <div style="margin-top:4px">
             <span class="badge">${esc(d.tailored_by === "llm" ? "AI drafted" : "keyword drafted")}</span>
+            ${d.potential_score && d.potential_score > d.score
+              ? `<span class="chip good">${d.score} → ${d.potential_score} if confirmed: ${(d.missing || []).map(esc).join(", ")}</span>` : ""}
             ${(d.flagged || []).length
               ? `<span class="chip warn">needs review: ${d.flagged.map(esc).join(", ")}</span>`
               : `<span class="chip">no added skills</span>`}
           </div></div>
         <button class="btn" data-draftm="${d.match_id}">Review</button>
       </div>`).join("")
-      : `<div class="muted">No new drafts — top matches already have tailored resumes, or none scored 85+.</div>`}
+      : `<div class="muted">No new drafts — good matches already have tailored resumes, or none reached the Tailor score in Settings (default 65).</div>`}
     <div class="muted" style="margin-top:8px">Drafts are never queued automatically. Review flagged skills in the tailor view before queueing.</div></div>`);
 
   secs.push(`<div class="card"><h3>Market pulse <span class="muted" style="font-weight:normal">· last ${mkt.window_days || 30} days</span></h3>

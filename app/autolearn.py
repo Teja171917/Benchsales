@@ -241,7 +241,21 @@ def queries_for_run(settings: dict) -> list:
     # the untouched built-in example queries are only a starting point: once
     # real resumes exist they would just waste searches on unrelated roles
     extra = [] if manual == db.DEFAULT_SEARCH_QUERIES else manual
-    auto = build_queries(db.consultants_with_resumes(), extra, mx)
+    # searches the Market Analyst added for hot skills the bench lacks: keep
+    # room for the newest two so they are not squeezed out by the resumes
+    try:
+        added = json.loads(settings.get("office_expanded_queries") or "[]")
+    except json.JSONDecodeError:
+        added = []
+    added = [q for q in added if isinstance(q, dict) and q.get("title")][-2:]
+    auto = build_queries(db.consultants_with_resumes(), extra,
+                         max(1, min(mx, 12) - len(added)))
+    seen = {((q["title"]).lower(), (q.get("location") or "").lower()) for q in auto}
+    for q in added:
+        key = (q["title"].lower(), (q.get("location") or "").lower())
+        if key not in seen:
+            auto.append({"title": q["title"], "location": q.get("location", "")})
+            seen.add(key)
     return auto or manual
 
 

@@ -35,11 +35,12 @@ from app import db
 from app import tailor as tailor_mod
 from app import market as market_mod
 from app import emptype
+from app import matcher
 from app.skills import display_name, extract_skills
 
-TAILOR_SCORE_CUTOFF = 85  # auto-draft tailors for matches at/above this
+TAILOR_SCORE_CUTOFF = 65  # default: draft tailors for matches at/above this (Settings can change it)
 OUTREACH_SCORE_CUTOFF = 80  # draft outreach emails for matches at/above this
-MAX_DRAFTS_PER_RUN = 10   # safety cap per office run (each drafting agent)
+MAX_DRAFTS_PER_RUN = 10   # default safety cap per office run (each drafting agent)
 STALE_QUEUED_DAYS = 3     # queued with no movement
 STALE_APPLIED_DAYS = 14   # applied with no update
 MARKET_WINDOW_DAYS = 30   # demand window for the Market Analyst
@@ -53,6 +54,13 @@ def _autopilot_on(settings) -> bool:
 
 def _now():
     return datetime.now(timezone.utc)
+
+
+def _num(settings, key, default):
+    try:
+        return int(float(settings.get(key) or default))
+    except (TypeError, ValueError):
+        return default
 
 
 def _parse_iso(s):
@@ -105,18 +113,45 @@ def _is_queued(match_id):
         return r is not None
 
 
+def _potential(full, flagged):
+    """Best score this match could reach IF a person confirms the candidate
+    really has the skills the job wants that the resume lacks (and any the
+    tailor flagged). Only people confirm skills - never the agents."""
+    extra = set(flagged) | set(full.get("missing_skills") or [])
+    if not extra:
+        return None
+    cons = db.get_consultant(full["consultant_id"]) or {}
+    skills = sorted(set(full.get("resume_skills") or []) | extra)
+    job = {"title": full.get("job_title"), "location": full.get("location"),
+           "remote_flag": full.get("remote_flag"),
+           "description": full.get("job_description"),
+           "posted_at": full.get("posted_at")}
+    r = matcher.score({"raw_text": full.get("resume_text") or "",
+                       "skills": skills,
+                       "location": cons.get("location") or ""}, job)
+    return r["score"]
+
+
 def _tailor(settings):
-    """Draft tailored resumes for top matches that lack one. Drafts only."""
-    drafted = []
-    candidates = [m for m in db.list_matches(min_score=TAILOR_SCORE_CUTOFF)
-                  if not _has_draft(m["id"]) and not _is_queued(m["id"])]
-    for m in candidates[:MAX_DRAFTS_PER_RUN]:
+    """Draft tailored resumes for good matches that lack one. Drafts only.
+    Matches Compliance quarantined are skipped (wrong employment type)."""
+    cutoff = _num(settings, "tailor_cutoff", TAILOR_SCORE_CUTOFF)
+    cap = _num(settings, "tailor_max_per_run", MAX_DRAFTS_PER_RUN)
+    drafted, errors = [], []
+    candidates = [m for m in db.list_matches(min_score=cutoff)
+                  if not m.get("compliance_flag")
+                  and not _has_draft(m["id"]) and not _is_queued(m["id"])]
+    for m in candidates:
+        if len(drafted) >= cap:
+            break
         full = db.get_match(m["id"])
         if not full or not full.get("resume_text"):
             continue
         try:
             result = tailor_mod.tailor_match(full, settings)
-        except Exception:
+            potential = _potential(full, result["added_skills_flagged"])
+        except Exception as e:
+            errors.append(f"{m['job_title']}: {e}")
             continue  # one bad tailor shouldn't stop the office
         tid = db.insert_tailored(m["id"], result["text"],
                                  result["tailored_by"],
@@ -128,11 +163,13 @@ def _tailor(settings):
             "job_title": m["job_title"],
             "company": m["company"],
             "score": m["score"],
+            "potential_score": potential,
+            "missing": list(full.get("missing_skills") or [])[:8],
             "tailored_by": result["tailored_by"],
             "flagged": result["added_skills_flagged"],
         })
     return {"drafted": len(drafted), "drafts": drafted,
-            "cutoff": TAILOR_SCORE_CUTOFF, "actions": []}
+            "cutoff": cutoff, "errors": errors[:5], "actions": []}
 
 
 def _watchdog(settings=None):
@@ -150,7 +187,7 @@ def _watchdog(settings=None):
 
     def days_old(iso):
         d = _parse_iso(iso)
-        return (now - d).days if d else 999
+        return (now - d).days if d else 0
 
     def check(a, status, limit, note):
         age = days_old(a.get("updated_at"))
@@ -200,6 +237,18 @@ def _manual_queries(settings) -> list:
         return []
 
 
+def _expanded_queries(settings=None) -> list:
+    """Searches the Market Analyst added itself. Kept apart from the typed
+    queries so the collector can reserve room for them (see autolearn)."""
+    raw = (settings or {}).get("office_expanded_queries") or db.get_setting(
+        "office_expanded_queries") or "[]"
+    try:
+        qs = json.loads(raw)
+        return [q for q in qs if isinstance(q, dict) and q.get("title")]
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 def _market_analyst(settings):
     """Per-consultant demand briefing from live posting data.
 
@@ -243,7 +292,8 @@ def _market_analyst(settings):
             })
     if autopilot and bench_skills:
         since_iso = (_now() - timedelta(days=MARKET_WINDOW_DAYS)).isoformat()
-        existing = {(q.get("title") or "").lower() for q in _manual_queries(settings)}
+        existing = {(q.get("title") or "").lower()
+                    for q in _manual_queries(settings) + _expanded_queries()}
         try:
             expanded = set(json.loads(db.get_setting("office_expanded_skills") or "[]"))
         except (json.JSONDecodeError, TypeError):
@@ -256,9 +306,10 @@ def _market_analyst(settings):
                 continue  # bench already covers it, or already expanded before
             for title in _top_titles_for_skill(d["skill"], since_iso):
                 if title.lower() not in existing:
-                    queries = _manual_queries(settings)
+                    queries = _expanded_queries()
                     queries.append({"title": title, "location": ""})
-                    db.set_setting("search_queries", json.dumps(queries))
+                    db.set_setting("office_expanded_queries",
+                                   json.dumps(queries[-MAX_QUERY_EXPANSIONS * 2:]))
                     expanded.add(d["skill"])
                     db.set_setting("office_expanded_skills", json.dumps(sorted(expanded)))
                     existing.add(title.lower())
@@ -331,7 +382,8 @@ def _outreach(settings):
     """Draft submission emails for top matches. Drafts only - never sent."""
     drafted = []
     candidates = [m for m in db.list_matches(min_score=OUTREACH_SCORE_CUTOFF)
-                  if not _is_queued(m["id"]) and not db.has_outreach_draft(m["id"])]
+                  if not m.get("compliance_flag")
+                  and not _is_queued(m["id"]) and not db.has_outreach_draft(m["id"])]
     for m in candidates[:MAX_DRAFTS_PER_RUN]:
         full = db.get_match(m["id"])
         if not full or not full.get("resume_text"):
@@ -413,10 +465,18 @@ def _compliance(settings):
 
 
 def run_office() -> dict:
-    """Run every agent and return the morning briefing."""
+    """Run every agent and return the morning briefing.
+
+    Compliance goes first so Tailor and Outreach never draft for a match that
+    was just quarantined. Scout looks back to the previous run when the app
+    was asleep for more than a day (free hosting sleeps)."""
     settings = db.get_settings()
     now = _now()
     since = now - timedelta(hours=24)
+    last = _parse_iso(settings.get("office_last_run_at") or "")
+    if last and last < since:
+        since = last
+    compliance = _compliance(settings)
     briefing = {
         "run_at": now.isoformat(),
         "autopilot": _autopilot_on(settings),
@@ -426,7 +486,25 @@ def run_office() -> dict:
             "watchdog": _watchdog(settings),
             "market_analyst": _market_analyst(settings),
             "outreach": _outreach(settings),
-            "compliance": _compliance(settings),
+            "compliance": compliance,
         },
     }
+    return briefing
+
+
+def run_and_store() -> dict:
+    """Run the office and save the briefing + run time. Used by the daily
+    scheduler and the Run button. The day is marked done even when a run
+    fails, so a broken run is not retried every 30 seconds."""
+    today = _now().date().isoformat()
+    try:
+        briefing = run_office()
+    except Exception as e:
+        db.set_setting("office_last_run_date", today)
+        db.set_setting("office_briefing_json", json.dumps(
+            {"run_at": _now().isoformat(), "agents": {}, "error": str(e)[:300]}))
+        raise
+    db.set_setting("office_briefing_json", json.dumps(briefing))
+    db.set_setting("office_last_run_date", today)
+    db.set_setting("office_last_run_at", briefing["run_at"])
     return briefing

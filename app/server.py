@@ -12,7 +12,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import autolearn, db, emptype, market, portals, usa
+from app import autolearn, contact as contact_mod, db, emptype, market, portals, usa
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
@@ -107,22 +107,23 @@ def _next_due(interval: int):
 
 
 def _auto_collect_loop():
-    """Background loop: refresh jobs on the schedule. The interval is the
-    setting, slowed down when needed to respect the job API's daily limit."""
+    """Background loop: refresh jobs on the schedule (the interval is the
+    setting, slowed down when needed to respect the job API's daily limit),
+    then let the Agent Office work on the fresh jobs."""
     while True:
-        _maybe_run_office()
-        time.sleep(30)
         try:
             interval = autolearn.effective_interval_minutes()
             if interval <= 0:
                 _collect_status["next_run_at"] = None
-                continue
-            due = _next_due(interval)
-            _collect_status["next_run_at"] = due.isoformat()
-            if datetime.now(timezone.utc) >= due and not _collect_status["running"]:
-                _do_collect()
+            else:
+                due = _next_due(interval)
+                _collect_status["next_run_at"] = due.isoformat()
+                if datetime.now(timezone.utc) >= due and not _collect_status["running"]:
+                    _do_collect()
         except Exception:
             pass  # collector records per-source errors; keep the loop alive
+        _maybe_run_office()  # after the refresh, so it sees today's jobs
+        time.sleep(30)
 
 
 def _maybe_run_office():
@@ -131,20 +132,14 @@ def _maybe_run_office():
     if db.get_setting("office_last_run_date") == today:
         return
     try:
-        briefing = office_mod.run_office()
-        db.set_setting("office_briefing_json", json.dumps(briefing))
-        db.set_setting("office_last_run_date", today)
+        office_mod.run_and_store()
     except Exception:
         pass  # never let the office break the scheduler loop
 
 
 @app.post("/api/office/run")
 def api_office_run():
-    briefing = office_mod.run_office()
-    db.set_setting("office_briefing_json", json.dumps(briefing))
-    db.set_setting("office_last_run_date",
-                   datetime.now(timezone.utc).date().isoformat())
-    return briefing
+    return office_mod.run_and_store()
 
 
 @app.get("/api/office/briefing")
@@ -291,17 +286,15 @@ def _parse_resume(filename: str, data: bytes) -> str:
         raise HTTPException(400, str(e))
 
 
-@app.post("/api/consultants/{cid}/resume")
-async def api_upload_resume(cid: int, file: UploadFile = File(...)):
-    if not db.get_consultant(cid):
-        raise HTTPException(404, "consultant not found")
-    data = await file.read()
+def _ingest_resume(cid: int, filename: str, data: bytes, kick: bool = True) -> dict:
+    """Read a resume file and attach it to consultant `cid`: learn new skills,
+    store the skills, rescore, match, and (optionally) start a job search."""
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(400, "file too large (10 MB max)")
     if not data:
         raise HTTPException(400, "the file is empty")
     try:
-        text = _parse_resume(file.filename or "resume", data).strip()
+        text = _parse_resume(filename or "resume", data).strip()
     except HTTPException:
         raise
     except Exception:  # damaged / password-protected / not really a .docx or .pdf
@@ -316,12 +309,12 @@ async def api_upload_resume(cid: int, file: UploadFile = File(...)):
     if db.get_setting("auto_learn_skills", "1") == "1":
         try:
             learned = db.add_learned_skills(
-                autolearn.candidate_skills(text), source=file.filename or "")
+                autolearn.candidate_skills(text), source=filename or "")
             autolearn.sync_vocabulary()
         except Exception:
             learned = []
     skills = extract_skills(text)
-    row = db.upsert_resume(cid, file.filename or "resume", text, skills)
+    row = db.upsert_resume(cid, filename or "resume", text, skills)
     # bring everything else in step (other resumes, old scores), then score
     # this consultant against the jobs already collected, so the Matches tab
     # is filled right away instead of after the next collection
@@ -333,13 +326,73 @@ async def api_upload_resume(cid: int, file: UploadFile = File(...)):
         new_matches = 0
     # and go and look for jobs for this person's role right now
     searching = False
-    try:
-        searching = _kick_collect()
-    except Exception:
-        pass
+    if kick:
+        try:
+            searching = _kick_collect()
+        except Exception:
+            pass
     return {"filename": row["filename"], "skills": skills,
             "chars": len(text), "new_matches": new_matches,
-            "learned_skills": learned, "searching_jobs": searching}
+            "learned_skills": learned, "searching_jobs": searching,
+            "text": text}
+
+
+@app.post("/api/consultants/{cid}/resume")
+async def api_upload_resume(cid: int, file: UploadFile = File(...)):
+    if not db.get_consultant(cid):
+        raise HTTPException(404, "consultant not found")
+    data = await file.read()
+    r = _ingest_resume(cid, file.filename or "resume", data)
+    r.pop("text", None)
+    return r
+
+
+@app.post("/api/resumes/auto")
+async def api_resume_auto(file: UploadFile = File(...), kick: int = 1):
+    """One resume file in -> consultant created (or found) from the name /
+    email in the resume, resume attached, skills + searches + matches done."""
+    data = await file.read()
+    filename = file.filename or "resume"
+    if not data:
+        raise HTTPException(400, "the file is empty")
+    try:
+        text = _parse_resume(filename, data).strip()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            400, "could not read this file (it may be damaged or "
+                 "password-protected); try saving it again as .docx or .pdf")
+    if not text:
+        raise HTTPException(400, "could not extract text from file")
+    info = contact_mod.parse_contact(text, filename)
+    existing = None
+    for c in db.list_consultants():
+        if info["email"] and (c.get("email") or "").lower() == info["email"].lower():
+            existing = c
+            break
+        if (c.get("name") or "").strip().lower() == info["name"].strip().lower():
+            existing = c
+            break
+    created = existing is None
+    if created:
+        c = db.create_consultant(info)
+    else:
+        c = existing
+        fill = {k: v for k, v in info.items()
+                if k != "name" and v and not (c.get(k) or "").strip()}
+        if fill:
+            c = db.update_consultant(c["id"], fill)
+    r = _ingest_resume(c["id"], filename, data, kick=bool(kick))
+    r.pop("text", None)
+    r.update(consultant_id=c["id"], name=c["name"], created=created,
+             email=c.get("email", ""), location=c.get("location", ""))
+    return r
+
+
+@app.post("/api/collect/kick")
+def api_collect_kick():
+    return {"started": _kick_collect()}
 
 
 # ---------- jobs ----------
@@ -617,7 +670,7 @@ def api_put_settings(data: dict):
                "llm_base_url", "llm_api_key", "llm_model",
                "collect_interval_minutes", "usa_only", "collect_emp_types",
                "auto_queries", "max_queries", "auto_learn_skills",
-               "adzuna_daily_budget"}
+               "adzuna_daily_budget", "tailor_cutoff", "tailor_max_per_run"}
     for k, v in data.items():
         if k not in allowed:
             raise HTTPException(400, f"unknown setting: {k}")
