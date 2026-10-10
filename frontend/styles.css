@@ -137,6 +137,8 @@ label.btn { cursor: pointer; }
   padding: 3px 9px; background: #e2e8f0; color: #334155;
   text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
 }
+/* long resume file names wrap instead of running off the card */
+.badge.fname { white-space: normal; overflow-wrap: anywhere; max-width: 100%; display: inline-block; }
 .badge.adzuna { background: #dbeafe; color: #1e40af; }
 .badge.jsearch { background: var(--green-bg); color: #166534; }
 .badge.remoteok { background: #fef9c3; color: #854d0e; }

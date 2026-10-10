@@ -226,7 +226,7 @@ async function renderConsultants() {
       <div class="muted">${esc(c.email)}${c.phone ? " · " + esc(c.phone) : ""}</div>
       <div style="margin:8px 0">
         ${c.has_resume
-          ? `<span class="badge">resume: ${esc(c.resume_filename)}</span>
+          ? `<span class="badge fname" title="${esc(c.resume_filename)}">resume: ${esc(c.resume_filename)}</span>
              <div style="margin-top:6px">${c.skills.map((s) => `<span class="chip">${esc(s)}</span>`).join("") || '<span class="muted">no skills parsed</span>'}</div>`
           : `<span class="muted">no resume yet</span>`}
       </div>
