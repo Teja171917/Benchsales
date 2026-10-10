@@ -13,6 +13,17 @@ REMOTE_WORDS = {"remote", "anywhere", "worldwide", "usa", "us", "united states",
                 "work from home", "wfh"}
 
 
+FEW_JOBS = 10
+SENIORITY = {"senior", "sr", "sr.", "junior", "jr", "jr.", "lead", "principal",
+             "staff", "associate", "chief", "head", "entry", "level", "mid"}
+
+
+def loosen_title(title: str) -> str:
+    """Title without seniority words; empty if nothing useful is left."""
+    words = [w for w in (title or "").split() if w.lower().strip(",.") not in SENIORITY]
+    return " ".join(words) if len(words) >= 2 else ""
+
+
 def is_remote_query(query: dict) -> bool:
     return (query.get("location") or "").strip().lower() in REMOTE_WORDS
 
@@ -35,6 +46,20 @@ def fetch(query: dict, settings: dict) -> list[dict]:
         db.usage_add("adzuna", 2)   # the retry costs calls the collector does not count
         # the retry is broader, so keep only the postings that say remote
         jobs = [j for j in _fetch(query, settings, remote_hint=False) if j["remote_flag"]]
+    # Adzuna needs every word of the title to match. A long title such as
+    # "Senior QA Test Manager" finds almost nothing, so when few jobs came
+    # back, search again without the seniority word ("QA Test Manager").
+    if remote and len(jobs) < FEW_JOBS:
+        short = loosen_title(query.get("title", ""))
+        if short and short.lower() != (query.get("title") or "").strip().lower():
+            from .. import db
+            db.usage_add("adzuna", 2)
+            try:
+                more = _fetch({**query, "title": short}, settings, remote_hint=True)
+            except Exception:  # noqa: BLE001 - the first search already worked
+                more = []
+            seen = {j["source_id"] for j in jobs}
+            jobs += [j for j in more if j["remote_flag"] and j["source_id"] not in seen]
     return jobs
 
 

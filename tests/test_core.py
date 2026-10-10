@@ -1181,6 +1181,30 @@ class AdzunaRemoteTests(unittest.TestCase):
                                  {"adzuna_app_id": "a", "adzuna_app_key": "b"})
         self.assertEqual(len(jobs), 1)
 
+    def test_few_results_trigger_a_shorter_title_search(self):
+        titles = []
+        job2 = dict(self.job, id=2, title="QA Test Manager")
+
+        def fake(url, params=None, **kw):
+            titles.append(params["what"])
+
+            class R:
+                def raise_for_status(self): pass
+                def json(self_):
+                    res = [self.job] if params["what"].startswith("Senior") else [job2]
+                    return {"count": 1, "results": res}
+            return R()
+        self.adzuna.get = fake
+        jobs = self.adzuna.fetch({"title": "Senior QA Test Manager", "location": "Remote"},
+                                 {"adzuna_app_id": "a", "adzuna_app_key": "b"})
+        self.assertIn("QA Test Manager", titles)
+        self.assertEqual({j["source_id"] for j in jobs}, {"1", "2"})
+
+    def test_loosen_title(self):
+        self.assertEqual(self.adzuna.loosen_title("Senior QA Test Manager"), "QA Test Manager")
+        self.assertEqual(self.adzuna.loosen_title("Teamcenter PLM"), "Teamcenter PLM")
+        self.assertEqual(self.adzuna.loosen_title("Senior Engineer"), "")
+
     def test_error_text_hides_keys(self):
         from app.sources.common import safe_error
         msg = safe_error(Exception("503 for url: https://x/search/1?app_id=0b71&app_key=a458a9&what=QA"))
