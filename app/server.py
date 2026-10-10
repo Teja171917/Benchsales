@@ -158,6 +158,12 @@ def api_office_briefing():
         return {"run_at": None, "agents": {}}
 
 
+@app.get("/api/office/drafts")
+def api_office_drafts(limit: int = 50):
+    """Persisted outreach email drafts (newest first). Drafts only - the app
+    never sends email itself."""
+    return db.list_outreach_drafts(max(1, min(limit, 200)))
+
 def _kick_collect():
     """Start a collection in the background unless one is already running
     (used right after a resume upload so new jobs for that person arrive

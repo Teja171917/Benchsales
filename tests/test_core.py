@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import autolearn, db, emptype, market, matcher, portals, skills, tailor, usa  # noqa: E402
+from app import autolearn, db, emptype, market, matcher, office, portals, skills, tailor, usa  # noqa: E402
 from app.sources import urlimport  # noqa: E402
 
 
@@ -499,6 +499,84 @@ class AddSkillsTests(unittest.TestCase):
         finally:
             db.DB_PATH = old
             tmp.cleanup()
+
+
+class OfficeAgentsTests(unittest.TestCase):
+    """The three new Agent Office specialists."""
+    RESUME = ("Priya Nair\nQA Manager | Dallas, TX\n\nSUMMARY\nQA leader.\n\n"
+              "TECHNICAL SKILLS\nLanguages: Java, SQL\nTools: Selenium, Jenkins\n")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "t.db"
+        db.init_db()
+
+    def tearDown(self):
+        matcher._jd_skills.cache_clear()
+        db.DB_PATH = self._old
+        self.tmp.cleanup()
+
+    def _job(self, title, desc, employment_type=""):
+        return db.insert_job({"source": "t", "source_id": title, "title": title,
+                              "company": "Co", "location": "", "remote_flag": 0,
+                              "url": "", "description": desc, "posted_at": "",
+                              "salary": "", "employment_type": employment_type})
+
+    def _consultant(self, emp_pref=""):
+        c = db.create_consultant({"name": "Priya Nair", "emp_pref": emp_pref})
+        sk = skills.extract_skills(self.RESUME)
+        db.upsert_resume(c["id"], "r.txt", self.RESUME, sk)
+        return c
+
+    def test_market_analyst_finds_hot_skills_and_gaps(self):
+        self._consultant()
+        for i in range(3):
+            self._job(f"QA Role {i}", "QA role needing Selenium and Java.")
+        for i in range(5):
+            self._job(f"Auto Role {i}", "Automation with Playwright and TypeScript.")
+        got = office._market_analyst()
+        self.assertEqual(got["window_days"], 30)
+        pc = got["consultants"][0]
+        hot = {h["skill"]: h["jobs"] for h in pc["hot_skills"]}
+        self.assertEqual(hot.get("selenium"), 3)
+        gaps = [g["skill"] for g in pc["gaps"]]
+        self.assertIn("playwright", gaps)
+
+    def test_outreach_drafts_from_real_data_only(self):
+        c = self._consultant()
+        jid = self._job("QA Manager", "We need a QA Manager with Selenium and Java.")
+        mid = db.insert_match(c["id"], jid, 85.0, {}, [])
+        first = office._outreach(db.get_settings())
+        self.assertEqual(first["drafted"], 1)
+        d = db.list_outreach_drafts()[0]
+        self.assertIn("Priya Nair", d["subject"])
+        self.assertIn("Selenium", d["body"])          # matched skill, display name
+        self.assertNotIn("years", d["body"].lower())  # never invents experience
+        self.assertIn("Drafted by BenchPilot Outreach", d["body"])
+        second = office._outreach(db.get_settings())  # no duplicates
+        self.assertEqual(second["drafted"], 0)
+        self.assertEqual(len(db.list_outreach_drafts()), 1)
+
+    def test_compliance_flags_type_mismatch(self):
+        c = self._consultant(emp_pref="c2c")
+        bad = self._job("QA Manager", "QA Manager role.", employment_type="Full-time")
+        good = self._job("QA Engineer", "QA Engineer role.", employment_type="C2C")
+        db.insert_match(c["id"], bad, 70.0, {}, [])
+        db.insert_match(c["id"], good, 70.0, {}, [])
+        got = office._compliance(db.get_settings())
+        self.assertEqual(got["issues"], 1)
+        item = got["items"][0]
+        self.assertEqual(item["issue"], "Employment-type mismatch")
+        self.assertIn("C2C", item["detail"])
+
+    def test_run_office_includes_all_six_agents(self):
+        self._consultant()
+        self._job("QA Manager", "QA Manager with Selenium.")
+        br = office.run_office()
+        self.assertEqual(set(br["agents"].keys()),
+                         {"scout", "tailor", "watchdog",
+                          "market_analyst", "outreach", "compliance"})
 
 
 if __name__ == "__main__":

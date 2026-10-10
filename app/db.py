@@ -103,6 +103,14 @@ CREATE TABLE IF NOT EXISTS tailored_resumes (
     created_at TEXT NOT NULL,
     FOREIGN KEY (match_id) REFERENCES "matches"(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS outreach_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL UNIQUE,
+    subject TEXT DEFAULT '',
+    body TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (match_id) REFERENCES "matches"(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     match_id INTEGER NOT NULL UNIQUE,
@@ -589,6 +597,39 @@ def update_tailored(tid: int, text: str, confirmed: list) -> dict | None:
         )
         conn.commit()
     return get_tailored(tid)
+
+
+# ---- outreach drafts ----
+def insert_outreach_draft(match_id: int, subject: str, body: str) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO outreach_drafts(match_id, subject, body, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (match_id, subject, body, now_iso()),
+        )
+        conn.commit()
+        if cur.lastrowid:
+            return cur.lastrowid
+        r = conn.execute("SELECT id FROM outreach_drafts WHERE match_id=?",
+                         (match_id,)).fetchone()
+        return r["id"] if r else 0
+
+
+def has_outreach_draft(match_id: int) -> bool:
+    with get_conn() as conn:
+        r = conn.execute("SELECT id FROM outreach_drafts WHERE match_id=? LIMIT 1",
+                         (match_id,)).fetchone()
+        return r is not None
+
+
+def list_outreach_drafts(limit: int = 50) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            'SELECT d.*, j.title AS job_title, j.company, c.name AS consultant_name '
+            'FROM outreach_drafts d JOIN "matches" m ON m.id=d.match_id '
+            'JOIN jobs j ON j.id=m.job_id JOIN consultants c ON c.id=m.consultant_id '
+            'ORDER BY d.id DESC LIMIT ?', (limit,)).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ---- applications ----

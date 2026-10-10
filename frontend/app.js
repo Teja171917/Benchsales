@@ -85,7 +85,9 @@ async function refreshBadges() {
     set("#nb-matches", matches.length);
     set("#nb-queue", apps.filter((a) => !["rejected", "withdrawn"].includes(a.status)).length);
     if (briefing && briefing.agents) {
-      const attn = (briefing.agents.watchdog?.stale || 0) + (briefing.agents.tailor?.drafted || 0);
+      const ag = briefing.agents;
+      const attn = (ag.watchdog?.stale || 0) + (ag.tailor?.drafted || 0)
+        + (ag.outreach?.drafted || 0) + (ag.compliance?.issues || 0);
       set("#nb-office", attn);
     }
   } catch (e) { /* badges are best-effort */ }
@@ -1090,12 +1092,15 @@ const AGENT_INFO = {
   scout: {name: "Scout", desc: "Watches the board for fresh matches above your threshold, grouped per consultant."},
   tailor: {name: "Tailor", desc: "Pre-drafts tailored resumes for top matches (score 85+). Drafts only — flagged skills need your review before anything is queued."},
   watchdog: {name: "Watchdog", desc: "Flags pipeline going cold: queued items with no action, applications with no update."},
+  market_analyst: {name: "Market Analyst", desc: "Per-consultant demand briefing from live postings: which of their skills are hot, and which in-demand skills they're missing."},
+  outreach: {name: "Outreach", desc: "Drafts submission emails for top matches (score 80+). Drafts only — a human always sends."},
+  compliance: {name: "Compliance", desc: "Flags employment-type conflicts before you apply, e.g. C2C consultant vs a W2-only posting."},
 };
 async function renderOffice() {
   const el = $("#tab-office");
   el.innerHTML = `
     <div class="row spread"><div><h2 style="margin-bottom:2px">Agent Office</h2>
-      <div class="muted">Three agents working your pipeline around the clock — runs automatically every day.</div></div>
+      <div class="muted">Six agents working your pipeline around the clock — runs automatically every day.</div></div>
       <button class="btn primary" id="of-run">Run the office now</button></div>
     <div class="stats" id="of-stats" style="margin-top:14px">${skelCards(4)}</div>
     <div class="dash-grid" id="of-agents">${skelCards(3)}</div>
@@ -1128,10 +1133,15 @@ async function renderOffice() {
   const scout = A.scout || {new_matches: 0, by_consultant: {}};
   const tailor = A.tailor || {drafted: 0, drafts: []};
   const wd = A.watchdog || {stale: 0, items: []};
+  const mkt = A.market_analyst || {consultants: [], top_skills: []};
+  const out = A.outreach || {drafted: 0, drafts: []};
+  const comp = A.compliance || {issues: 0, items: []};
 
   $("#of-stats").innerHTML = [
     ["New matches (24h)", scout.new_matches, "accent", "matches"],
     ["Resume drafts ready", tailor.drafted, tailor.drafted ? "good" : "", null],
+    ["Outreach drafts", out.drafted, out.drafted ? "good" : "", null],
+    ["Compliance flags", comp.issues, comp.issues ? "accent" : "", null],
     ["Stale pipeline items", wd.stale, wd.stale ? "accent" : "", "queue"],
     ["Briefing from", ago(br.run_at), "", null],
   ].map(([l, n, cls, tab]) => `<div class="stat ${cls}"${tab ? ` data-goto="${tab}" role="button" tabindex="0"` : ""}>
@@ -1141,11 +1151,14 @@ async function renderOffice() {
     s.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") go(s.dataset.goto); };
   });
 
-  $("#of-agents").innerHTML = ["scout", "tailor", "watchdog"].map((k) => {
+  $("#of-agents").innerHTML = ["scout", "tailor", "watchdog", "market_analyst", "outreach", "compliance"].map((k) => {
     const info = AGENT_INFO[k];
     const res = k === "scout" ? `${scout.new_matches} new matches`
       : k === "tailor" ? `${tailor.drafted} drafts ready`
-      : `${wd.stale} items flagged`;
+      : k === "watchdog" ? `${wd.stale} items flagged`
+      : k === "market_analyst" ? `${mkt.consultants.length} consultants briefed`
+      : k === "outreach" ? `${out.drafted} drafts ready`
+      : `${comp.issues} issues flagged`;
     return `<div class="card"><h3>${info.name}</h3>
       <div class="muted" style="margin-bottom:8px">${info.desc}</div>
       <div><b>${esc(res)}</b> <span class="muted">· last run ${esc(ago(br.run_at))}</span></div></div>`;
@@ -1181,6 +1194,38 @@ async function renderOffice() {
       : `<div class="muted">No new drafts — top matches already have tailored resumes, or none scored 85+.</div>`}
     <div class="muted" style="margin-top:8px">Drafts are never queued automatically. Review flagged skills in the tailor view before queueing.</div></div>`);
 
+  secs.push(`<div class="card"><h3>Market pulse <span class="muted" style="font-weight:normal">· last ${mkt.window_days || 30} days</span></h3>
+    ${(mkt.top_skills || []).length ? `<div style="margin:6px 0"><span class="muted">Hottest skills overall: </span>${mkt.top_skills.slice(0, 8).map((s) => `<span class="chip">${esc(s.skill)} <span class="muted">${s.jobs}</span></span>`).join("")}</div>` : ""}
+    ${(mkt.consultants || []).length ? mkt.consultants.map((c) => `
+      <div style="margin-top:10px"><b>${esc(c.consultant_name)}</b>
+        ${(c.hot_skills || []).length ? `<div style="margin-top:4px"><span class="muted">hot: </span>${c.hot_skills.map((s) => `<span class="chip">${esc(s.skill)} <span class="muted">${s.jobs}</span></span>`).join("")}</div>` : ""}
+        ${(c.gaps || []).length ? `<div style="margin-top:4px"><span class="muted">gaps worth learning: </span>${c.gaps.map((s) => `<span class="chip miss">${esc(s.skill)} <span class="muted">${s.jobs}</span></span>`).join("")}</div>` : ""}
+      </div>`).join("")
+      : `<div class="muted" style="margin-top:8px">No resume data to analyze yet — upload consultant resumes first.</div>`}</div>`);
+
+  let drafts = [];
+  try { drafts = await api("/api/office/drafts?limit=20"); } catch (e) { drafts = []; }
+  secs.push(`<div class="card"><h3>Outreach drafts</h3>
+    ${drafts.length ? drafts.map((d) => `
+      <div style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <div class="row spread"><div><b>${esc(d.subject)}</b>
+          <span class="muted"> · ${esc(d.job_title)} · ${esc(d.company)} · for ${esc(d.consultant_name)}</span></div>
+          <button class="btn" data-copy-draft="${d.id}">Copy email</button></div>
+        <details style="margin-top:6px"><summary class="muted">Preview</summary>
+          <pre class="doc" id="of-draft-${d.id}">${esc(d.body || "")}</pre></details>
+      </div>`).join("")
+      : `<div class="muted">No drafts yet — they appear here after an office run finds matches scoring ${out.cutoff || 80}+.</div>`}
+    <div class="muted" style="margin-top:8px">Drafts only — BenchPilot never sends email. Copy, edit, and send from your own inbox.</div></div>`);
+
+  secs.push(`<div class="card"><h3>Compliance flags</h3>
+    ${(comp.items || []).length ? comp.items.map((c) => `
+      <div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <span class="chip warn">${esc(c.issue)}</span>
+        <div><b>${esc(c.job_title)}</b> <span class="muted">· ${esc(c.company)} · for ${esc(c.consultant_name)} · score ${c.score}</span>
+          <div class="muted">${esc(c.detail)}</div></div>
+      </div>`).join("")
+      : `<div class="muted" style="margin-top:8px">No conflicts — employment types line up on current matches.</div>`}</div>`);
+
   secs.push(`<div class="card"><div class="row spread"><h3 style="margin:0">Needs attention</h3>
     ${wd.items.length ? `<button class="btn" id="of-allq">Open queue</button>` : ""}</div>
     ${wd.items.length ? wd.items.map((w) => `
@@ -1196,6 +1241,16 @@ async function renderOffice() {
   if (allm) allm.onclick = () => go("matches");
   const allq = $("#of-allq");
   if (allq) allq.onclick = () => go("queue");
+  $$("[data-copy-draft]", el).forEach((b) => b.onclick = async () => {
+    const pre = document.getElementById("of-draft-" + b.dataset.copyDraft);
+    const text = pre ? pre.textContent : "";
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Draft copied — paste it into your email", "ok");
+    } catch (e) {
+      toast("Copy failed — select the preview text manually", "err");
+    }
+  });
   $$("[data-draftm]", el).forEach((b) => b.onclick = () => { go("matches"); });
 }
 
