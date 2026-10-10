@@ -624,7 +624,7 @@ async function runCollection() {
   try {
     const s = await api("/api/collect", {method: "POST"});
     const lines = Object.entries(s.sources).map(([n, v]) =>
-      `${n}: ${v.status}${v.new ? ` (+${v.new} new)` : ""}`);
+      `${n}: ${v.status}${v.status === "ok" ? ` — found ${v.jobs || 0}, ${v.new || 0} new` : ""}`);
     if (prog) prog.innerHTML = `<div class="okbox">Done — ${s.jobs_new} new jobs, ${s.matches_new} new matches.<br>${lines.map(esc).join("<br>")}</div>`;
     else toast(`Done — ${s.jobs_new} new jobs, ${s.matches_new} new matches`, "ok");
     if ($("#j-list")) loadJobs();
