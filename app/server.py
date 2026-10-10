@@ -16,7 +16,7 @@ from app import autolearn, contact as contact_mod, db, emptype, market, portals,
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
-from app import resume_ai, resume_import
+from app import persist, resume_ai, resume_import
 from app import tailor as tailor_mod
 from app.skills import display_name, extract_skills
 from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, urlimport
@@ -51,7 +51,9 @@ async def auth_gate(request: Request, call_next):
 
 @app.on_event("startup")
 def _startup():
+    persist.restore()          # bring back the saved database first (Replit wipes the disk)
     db.init_db()
+    persist.start_background()
     autolearn.sync_vocabulary()  # learned skills back into memory after a restart
     t = threading.Thread(target=_auto_collect_loop, daemon=True,
                          name="benchpilot-auto-collect")
@@ -458,6 +460,17 @@ def _maybe_import_folder():
     except ValueError:
         pass
     _do_import()
+
+
+@app.get("/api/backup/status")
+def api_backup_status():
+    return persist.status()
+
+
+@app.post("/api/backup/now")
+def api_backup_now():
+    persist.backup(force=True)
+    return persist.status()
 
 
 @app.get("/api/resume-import/status")

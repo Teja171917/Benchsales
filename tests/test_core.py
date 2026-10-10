@@ -2,6 +2,7 @@
 
 Run from the project root:   python -m unittest discover -s tests -v
 """
+import os
 import sqlite3
 import sys
 import json
@@ -1016,6 +1017,92 @@ class RoleFromSummaryTests(unittest.TestCase):
 
     def test_nothing_sensible_gives_empty(self):
         self.assertEqual(matcher.role_from_summary("hello world\nsome text"), "")
+
+
+class FakeStore:
+    def __init__(self):
+        self.files = {}
+    def exists(self, name):
+        return name in self.files
+    def put(self, name, path):
+        self.files[name] = open(path, "rb").read()
+    def get(self, name, path):
+        open(path, "wb").write(self.files[name])
+
+
+class PersistTests(unittest.TestCase):
+    def setUp(self):
+        from app import persist
+        self.persist = persist
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old = db.DB_PATH
+        self.old_sig = persist._last_sig
+        persist._last_sig = None
+        db.DB_PATH = Path(self.tmp.name) / "a" / "b.db"
+        self.store = FakeStore()
+
+    def tearDown(self):
+        db.DB_PATH = self.old
+        self.persist._last_sig = self.old_sig
+        self.tmp.cleanup()
+
+    def test_backup_then_restore_after_wipe(self):
+        db.init_db()
+        db.set_setting("llm_api_key", "gsk_test")
+        c = db.create_consultant({"name": "Sharan Murali", "email": "s@x.com"})
+        self.assertTrue(self.persist.backup(self.store))
+        self.assertIn(self.persist.OBJECT, self.store.files)
+        db.DB_PATH.unlink()                      # Republish wipes the disk
+        self.assertTrue(self.persist.restore(self.store))
+        db.init_db()
+        self.assertEqual(db.get_setting("llm_api_key"), "gsk_test")
+        self.assertEqual(db.get_consultant(c["id"])["name"], "Sharan Murali")
+
+    def test_unchanged_database_is_not_uploaded_twice(self):
+        db.init_db()
+        self.assertTrue(self.persist.backup(self.store))
+        self.assertFalse(self.persist.backup(self.store))
+        self.assertTrue(self.persist.backup(self.store, force=True))
+
+    def test_newer_local_database_is_not_overwritten(self):
+        db.init_db()
+        db.create_consultant({"name": "Old One", "email": "o@x.com"})
+        self.persist.backup(self.store)
+        db.create_consultant({"name": "New Two", "email": "n@x.com"})      # newer than the backup
+        db.set_setting("backup_stamp", "2999-01-01T00:00:00+00:00")
+        self.assertFalse(self.persist.restore(self.store))
+        names = [c["name"] for c in db.list_consultants()]
+        self.assertIn("New Two", names)
+
+    def test_nothing_in_storage_does_nothing(self):
+        self.assertFalse(self.persist.restore(self.store))
+
+    def test_failure_never_raises(self):
+        class Broken(FakeStore):
+            def put(self, name, path):
+                raise RuntimeError("no bucket")
+        db.init_db()
+        self.assertFalse(self.persist.backup(Broken()))
+        self.assertIn("backup failed", self.persist.status()["last_error"])
+
+
+class EnvSettingsTests(unittest.TestCase):
+    def test_secret_fills_empty_key_but_saved_value_wins(self):
+        tmp = tempfile.TemporaryDirectory()
+        old = db.DB_PATH
+        db.DB_PATH = Path(tmp.name) / "e.db"
+        env = dict(os.environ)
+        try:
+            db.init_db()
+            os.environ["LLM_API_KEY"] = "from-secret"
+            os.environ["LLM_MODEL"] = "model-secret"
+            self.assertEqual(db.get_setting("llm_api_key"), "from-secret")
+            db.set_setting("llm_model", "typed-in-settings")
+            self.assertEqual(db.get_setting("llm_model"), "typed-in-settings")
+        finally:
+            os.environ.clear(); os.environ.update(env)
+            db.DB_PATH = old
+            tmp.cleanup()
 
 
 if __name__ == "__main__":

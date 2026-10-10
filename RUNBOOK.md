@@ -183,3 +183,18 @@ Notes: only files directly inside the folder are read (PDF, Word, text, Google D
 - A consultant gets **Needs a quick check** only when a check fails (no valid email, name not confirmed, only one name found, AI unsure, AI and rule reader disagree). The card has **Looks right** and **Fix it** buttons. Saving an edit also clears the flag.
 - No AI key? The same checks run on the simple rule reader, so more resumes are flagged. The resume text is sent to the AI provider when a key is set - tell the team before using real resumes.
 - The Google Drive folder import (Settings) uses the same reader.
+
+## Keep the data safe (free): backup + Secrets
+
+Problem: a published Replit site runs on a disk that is **wiped on every Republish** (and when the site sleeps). Consultants, resumes, matches and keys saved on that disk disappear.
+
+Fix (free), two parts:
+
+1. **Backup (App Storage).** `app/persist.py` copies the database to Replit App Storage every 20 seconds (only when it changed) and puts it back at start-up. Settings → *Data backup* shows **ON/OFF**, the last save time, and a *Back up now* button.
+   - Replit: left tools → **App Storage** → **Create bucket** → make sure it is the app's default bucket.
+   - `requirements.txt` already lists `replit-object-storage`.
+   - Deployment settings: keep **max machines = 1**.
+2. **Secrets (keys).** In Replit → **Secrets** add: `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `RAPIDAPI_KEY` (optional), `LLM_BASE_URL` (`https://api.groq.com/openai/v1`), `LLM_API_KEY`, `LLM_MODEL` (`llama-3.3-70b-versatile`), and `BENCHPILOT_PASSWORD`. A key typed in Settings wins; an empty one is filled from the Secret.
+
+Check: add a consultant → wait 1 minute → Settings shows "Last saved" → Republish → the consultant is still there.
+Limit: changes made in the last ~20 seconds before a restart can be lost.

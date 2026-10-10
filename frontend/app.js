@@ -940,7 +940,10 @@ async function renderSettings() {
         <label>Tailor resumes for matches of</label><input type="number" id="s-tcut" min="30" max="100" value="${esc(s.tailor_cutoff || "65")}" placeholder="65">
         <label>Max drafts per day</label><input type="number" id="s-tmax" min="1" max="50" value="${esc(s.tailor_max_per_run || "10")}" placeholder="10">
       </div>
-      <div class="muted">Keys are stored on this machine only and shown masked. The LLM is also used to read resumes. Resume text is sent to that AI provider. Without an LLM key, tailoring and resume reading use the built-in simple methods and more resumes are marked "Needs a quick check".</div>
+      <div class="muted">Keys are shown masked. They can also be set as Replit Secrets (ADZUNA_APP_ID, ADZUNA_APP_KEY, RAPIDAPI_KEY, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL), which survive Republish. The LLM is also used to read resumes. Resume text is sent to that AI provider. Without an LLM key, tailoring and resume reading use the built-in simple methods and more resumes are marked "Needs a quick check".</div>
+    </div>
+    <div class="card"><h3>Data backup</h3>
+      <div id="s-backup"><span class="muted">Loading…</span></div>
     </div>
     <div class="card"><h3>Fully automatic mode</h3>
       <label class="toggle"><input type="checkbox" id="s-autoq"${s.auto_queries === "0" ? "" : " checked"}> Search for the jobs the resumes are for (role + city, and Remote) — no typing needed</label>
@@ -1011,6 +1014,28 @@ async function renderSettings() {
       });
     } catch (e) { box.innerHTML = `<span class="muted">Status unavailable</span>`; }
   })();
+  const loadBackup = async () => {
+    const box = $("#s-backup");
+    if (!box) return;
+    try {
+      const b = await api("/api/backup/status");
+      box.innerHTML = b.enabled
+        ? `<div><span class="dot ok"></span> <b>Backup is ON.</b> ${b.last_backup_at ? "Last saved " + esc(ago(b.last_backup_at)) + "." : "First save is coming within a minute."}
+            ${b.restored ? '<span class="muted">(your data was brought back after the last restart)</span>' : ""}</div>
+           ${b.last_error ? `<div class="errbox" style="margin-top:6px">${esc(b.last_error)}</div>` : ""}
+           <button class="btn" id="s-bknow" style="margin-top:8px">Back up now</button>
+           <div class="muted" style="margin-top:6px">Consultants, resumes, matches and keys are copied to permanent storage, so Republish does not delete them.</div>`
+        : `<div><span class="dot err"></span> <b>Backup is OFF.</b> ${esc(b.reason || "")}</div>
+           <div class="muted" style="margin-top:6px">Until it is ON, Republish deletes consultants, resumes and keys. See RUNBOOK.md, "Keep the data safe".</div>`;
+      const btn = $("#s-bknow");
+      if (btn) btn.onclick = async () => {
+        btn.disabled = true; btn.textContent = "Saving…";
+        try { await api("/api/backup/now", {method: "POST"}); toast("Backed up", "ok"); } catch (e) { toast(e.message, "err"); }
+        loadBackup();
+      };
+    } catch (e) { box.innerHTML = `<span class="muted">Status unavailable</span>`; }
+  };
+  loadBackup();
   const qbox = $("#s-queries");
   const qrow = (q) => {
     const d = document.createElement("div");

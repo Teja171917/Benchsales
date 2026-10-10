@@ -214,10 +214,23 @@ def init_db() -> None:
 
 
 # ---- settings ----
+# Keys can also come from Replit "Secrets" (environment variables). Those stay
+# when the site is rebuilt, so they fill in any key that is empty here.
+ENV_SETTINGS = {
+    "adzuna_app_id": "ADZUNA_APP_ID", "adzuna_app_key": "ADZUNA_APP_KEY",
+    "rapidapi_key": "RAPIDAPI_KEY", "llm_base_url": "LLM_BASE_URL",
+    "llm_api_key": "LLM_API_KEY", "llm_model": "LLM_MODEL",
+}
+
+
 def get_settings() -> dict:
     with get_conn() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    return {r["key"]: r["value"] for r in rows}
+    out = {r["key"]: r["value"] for r in rows}
+    for key, env in ENV_SETTINGS.items():
+        if not (out.get(key) or "").strip() and os.environ.get(env, "").strip():
+            out[key] = os.environ[env].strip()
+    return out
 
 
 def get_setting(key: str, default: str = "") -> str:
