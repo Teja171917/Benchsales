@@ -92,8 +92,9 @@ def run() -> dict:
                 summary["jobs_fetched"] += fetched
                 summary["jobs_new"] += new
             except Exception as e:  # noqa: BLE001 - keep collecting other sources
-                st["status"] = f"error: {e}"
-                summary["errors"].append(f"{name}: {e}")
+                from app.sources.common import safe_error
+                st["status"] = f"error: {safe_error(e)}"
+                summary["errors"].append(f"{name}: {safe_error(e)}")
         summary["sources"][name] = st
         db.set_setting(f"last_run_{name}", json.dumps({
             "status": st["status"], "jobs": st["jobs"], "new": st["new"],

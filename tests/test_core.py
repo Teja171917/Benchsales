@@ -1160,6 +1160,34 @@ class AdzunaRemoteTests(unittest.TestCase):
         self.assertNotIn("what_or", self.calls[-1])
         self.assertEqual(db.usage_today("adzuna"), 2)
 
+    def test_retry_drops_on_site_jobs(self):
+        self.first = []
+        onsite = dict(self.job, description="office based role", title="PLM Admin")
+        self.second = [onsite]
+        jobs = self.adzuna.fetch({"title": "Teamcenter PLM", "location": "Remote"},
+                                 {"adzuna_app_id": "a", "adzuna_app_key": "b"})
+        self.assertEqual(jobs, [])
+
+    def test_remote_filter_error_falls_back_instead_of_failing(self):
+        self.second = [self.job]
+        orig = self.adzuna.get
+
+        def flaky(url, params=None, **kw):
+            if "what_or" in params:
+                raise RuntimeError("503 Server Error")
+            return orig(url, params=params, **kw)
+        self.adzuna.get = flaky
+        jobs = self.adzuna.fetch({"title": "QA", "location": "Remote"},
+                                 {"adzuna_app_id": "a", "adzuna_app_key": "b"})
+        self.assertEqual(len(jobs), 1)
+
+    def test_error_text_hides_keys(self):
+        from app.sources.common import safe_error
+        msg = safe_error(Exception("503 for url: https://x/search/1?app_id=0b71&app_key=a458a9&what=QA"))
+        self.assertNotIn("a458a9", msg)
+        self.assertNotIn("0b71", msg)
+        self.assertIn("what=QA", msg)
+
     def test_city_search_still_sends_the_city(self):
         self.first = [self.job]
         self.second = [self.job]

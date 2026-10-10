@@ -21,12 +21,20 @@ def fetch(query: dict, settings: dict) -> list[dict]:
     """Adzuna's "where" is a place name, so "Remote" finds nothing. A remote
     search therefore leaves "where" out and asks for postings that mention
     remote / work from home. If that finds nothing, it retries once without
-    that extra word (so the title alone still brings jobs)."""
-    jobs = _fetch(query, settings, remote_hint=is_remote_query(query))
-    if not jobs and is_remote_query(query):
+    that extra word and keeps only the postings that say remote."""
+    remote = is_remote_query(query)
+    jobs, failed = [], None
+    try:
+        jobs = _fetch(query, settings, remote_hint=remote)
+    except Exception as e:  # noqa: BLE001 - e.g. a temporary 503 on the extra filter
+        if not remote:
+            raise
+        failed = e
+    if not jobs and remote:
         from .. import db
         db.usage_add("adzuna", 2)   # the retry costs calls the collector does not count
-        jobs = _fetch(query, settings, remote_hint=False)
+        # the retry is broader, so keep only the postings that say remote
+        jobs = [j for j in _fetch(query, settings, remote_hint=False) if j["remote_flag"]]
     return jobs
 
 

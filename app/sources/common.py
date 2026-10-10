@@ -13,6 +13,14 @@ def get(url, params=None, headers=None, timeout=30):
     return requests.get(url, params=params, headers=h, timeout=timeout)
 
 
+def safe_error(e) -> str:
+    """Error text with secrets removed (a failed request puts the whole URL,
+    including app_key / api keys, into the message)."""
+    import re
+    return re.sub(r"(?i)\b(app_id|app_key|api_key|apikey|key|token|secret)=[^&\s'\"]+",
+                  r"\1=***", str(e))
+
+
 def clean(s):
     return (s or "").strip()
 
