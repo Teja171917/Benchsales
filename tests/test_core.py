@@ -1105,5 +1105,69 @@ class EnvSettingsTests(unittest.TestCase):
             tmp.cleanup()
 
 
+class AdzunaRemoteTests(unittest.TestCase):
+    def setUp(self):
+        from app.sources import adzuna
+        self.adzuna = adzuna
+        self.calls = []
+        self.old_get = adzuna.get
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_db = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "z.db"
+        db.init_db()
+
+        outer = self
+
+        class R:
+            def __init__(self, results):
+                self.results = results
+            def raise_for_status(self):
+                pass
+            def json(self):
+                return {"count": len(self.results), "results": self.results}
+
+        def fake_get(url, params=None, **kw):
+            outer.calls.append(dict(params))
+            if "what_or" in params:
+                return R(outer.first)
+            return R(outer.second)
+        adzuna.get = fake_get
+        self.job = {"id": 1, "title": "QA Manager", "company": {"display_name": "X"},
+                    "location": {"display_name": "Austin, TX"}, "description": "work remotely",
+                    "redirect_url": "http://x", "created": "2026-10-01"}
+
+    def tearDown(self):
+        self.adzuna.get = self.old_get
+        db.DB_PATH = self.old_db
+        self.tmp.cleanup()
+
+    def test_remote_search_leaves_where_out_and_asks_for_remote(self):
+        self.first = [self.job]
+        self.second = []
+        jobs = self.adzuna.fetch({"title": "Senior QA Test Manager", "location": "Remote"},
+                                 {"adzuna_app_id": "a", "adzuna_app_key": "b"})
+        self.assertEqual(len(jobs), 1)
+        self.assertNotIn("where", self.calls[0])
+        self.assertIn("remote", self.calls[0]["what_or"])
+        self.assertTrue(jobs[0]["remote_flag"])
+
+    def test_remote_search_retries_without_remote_word_when_empty(self):
+        self.first = []
+        self.second = [self.job]
+        jobs = self.adzuna.fetch({"title": "Teamcenter PLM", "location": "Remote"},
+                                 {"adzuna_app_id": "a", "adzuna_app_key": "b"})
+        self.assertEqual(len(jobs), 1)
+        self.assertNotIn("what_or", self.calls[-1])
+        self.assertEqual(db.usage_today("adzuna"), 2)
+
+    def test_city_search_still_sends_the_city(self):
+        self.first = [self.job]
+        self.second = [self.job]
+        self.adzuna.fetch({"title": "QA", "location": "Dallas, TX"},
+                          {"adzuna_app_id": "a", "adzuna_app_key": "b"})
+        self.assertEqual(self.calls[0]["where"], "Dallas, TX")
+        self.assertNotIn("what_or", self.calls[0])
+
+
 if __name__ == "__main__":
     unittest.main()

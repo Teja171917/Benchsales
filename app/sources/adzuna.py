@@ -9,14 +9,39 @@ def enabled(settings: dict) -> bool:
     return bool(settings.get("adzuna_app_id") and settings.get("adzuna_app_key"))
 
 
+REMOTE_WORDS = {"remote", "anywhere", "worldwide", "usa", "us", "united states",
+                "work from home", "wfh"}
+
+
+def is_remote_query(query: dict) -> bool:
+    return (query.get("location") or "").strip().lower() in REMOTE_WORDS
+
+
 def fetch(query: dict, settings: dict) -> list[dict]:
+    """Adzuna's "where" is a place name, so "Remote" finds nothing. A remote
+    search therefore leaves "where" out and asks for postings that mention
+    remote / work from home. If that finds nothing, it retries once without
+    that extra word (so the title alone still brings jobs)."""
+    jobs = _fetch(query, settings, remote_hint=is_remote_query(query))
+    if not jobs and is_remote_query(query):
+        from .. import db
+        db.usage_add("adzuna", 2)   # the retry costs calls the collector does not count
+        jobs = _fetch(query, settings, remote_hint=False)
+    return jobs
+
+
+def _fetch(query: dict, settings: dict, remote_hint: bool) -> list[dict]:
     app_id = settings["adzuna_app_id"]
     app_key = settings["adzuna_app_key"]
     jobs: list[dict] = []
+    remote_q = is_remote_query(query)
     params = {"app_id": app_id, "app_key": app_key,
               "what": query.get("title", ""),
-              "where": query.get("location", ""),
               "results_per_page": 50, "content-type": "application/json"}
+    if not remote_q:
+        params["where"] = query.get("location", "")
+    if remote_hint:
+        params["what_or"] = "remote telecommute work-from-home"
     # Adzuna can't OR filters: narrow to contract roles only when the
     # recruiter asked for contract types and NOT full-time.
     want = wanted_emp(settings)
@@ -43,7 +68,8 @@ def fetch(query: dict, settings: dict) -> list[dict]:
                 "title": clean(j.get("title")),
                 "company": clean(comp.get("display_name")),
                 "location": clean(loc.get("display_name")),
-                "remote_flag": "remote" in (loc.get("display_name") or "").lower(),
+                "remote_flag": "remote" in (loc.get("display_name") or "").lower()
+                or ("remote" in (clean(j.get("title")) + " " + desc[:600]).lower()),
                 "url": clean(j.get("redirect_url")),
                 "description": desc,
                 "posted_at": clean(j.get("created")),
