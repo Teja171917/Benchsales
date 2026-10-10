@@ -4,6 +4,7 @@ Run from the project root:   python -m unittest discover -s tests -v
 """
 import sqlite3
 import sys
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -311,6 +312,16 @@ class SkillsTests(unittest.TestCase):
         self.assertEqual(skills.display_name("selenium webdriver"), "Selenium WebDriver")
         self.assertEqual(skills.display_name("test automation"), "Test Automation")
 
+    def test_sentence_final_skill_still_matches(self):
+        # regression: the "." guard used to swallow skills at sentence end
+        from app import skills
+        self.assertIn("playwright",
+                      skills.extract_skills("Senior QA with Playwright."))
+        self.assertIn("selenium",
+                      skills.extract_skills("Hands-on Selenium."))
+        # the guard's real job: no matching inside longer tokens
+        self.assertNotIn("java", skills.extract_skills("JavaScript developer"))
+
 
 class AutoTests(unittest.TestCase):
     """The 'works without humans' parts: learning, queries, quota, rescoring."""
@@ -535,7 +546,7 @@ class OfficeAgentsTests(unittest.TestCase):
             self._job(f"QA Role {i}", "QA role needing Selenium and Java.")
         for i in range(5):
             self._job(f"Auto Role {i}", "Automation with Playwright and TypeScript.")
-        got = office._market_analyst()
+        got = office._market_analyst(db.get_settings())
         self.assertEqual(got["window_days"], 30)
         pc = got["consultants"][0]
         hot = {h["skill"]: h["jobs"] for h in pc["hot_skills"]}
@@ -569,6 +580,83 @@ class OfficeAgentsTests(unittest.TestCase):
         item = got["items"][0]
         self.assertEqual(item["issue"], "Employment-type mismatch")
         self.assertIn("C2C", item["detail"])
+
+    def test_autopilot_quarantines_and_scout_hides(self):
+        c = self._consultant(emp_pref="c2c")
+        jid = self._job("QA Manager", "QA Manager role.", employment_type="Full-time")
+        mid = db.insert_match(c["id"], jid, 70.0, {}, [])
+        got = office._compliance(db.get_settings())  # autopilot on by default
+        self.assertTrue(got["items"][0]["quarantined"])
+        self.assertEqual(len(got["actions"]), 1)
+        with db.get_conn() as conn:
+            flag = conn.execute('SELECT compliance_flag FROM "matches" WHERE id=?',
+                                (mid,)).fetchone()["compliance_flag"]
+        self.assertEqual(flag, 1)
+        # scout no longer surfaces it as a fresh match
+        import datetime as _dt
+        since = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=25)
+        fresh = office._scout(db.get_settings(), since)["new_matches"]
+        self.assertEqual(fresh, 0)
+        # restore works
+        db.set_compliance_flag(mid, 0)
+        fresh = office._scout(db.get_settings(), since)["new_matches"]
+        self.assertEqual(fresh, 1)
+
+    def test_autopilot_off_only_reports(self):
+        db.set_setting("office_autopilot", "0")
+        c = self._consultant(emp_pref="c2c")
+        jid = self._job("QA Manager", "QA Manager role.", employment_type="Full-time")
+        mid = db.insert_match(c["id"], jid, 70.0, {}, [])
+        got = office._compliance(db.get_settings())
+        self.assertEqual(got["issues"], 1)
+        self.assertFalse(got["items"][0]["quarantined"])
+        self.assertEqual(got["actions"], [])
+        with db.get_conn() as conn:
+            flag = conn.execute('SELECT compliance_flag FROM "matches" WHERE id=?',
+                                (mid,)).fetchone()["compliance_flag"]
+        self.assertEqual(flag, 0)
+
+    def test_market_analyst_expands_queries_for_hot_gaps(self):
+        self._consultant()  # skills: java, sql, selenium, jenkins - no playwright
+        for i in range(4):
+            self._job(f"Playwright QA {i}", "Senior QA Automation with Playwright.")
+        got = office._market_analyst(db.get_settings())
+        self.assertTrue(got["actions"], "expected a query-expansion action")
+        queries = json.loads(db.get_setting("search_queries"))
+        titles = [q["title"].lower() for q in queries]
+        self.assertTrue(any("playwright" in t for t in titles))
+        # second run must not duplicate the query
+        n = len(queries)
+        office._market_analyst(db.get_settings())
+        self.assertEqual(len(json.loads(db.get_setting("search_queries"))), n)
+
+    def test_watchdog_leaves_followup_note_once(self):
+        c = self._consultant()
+        jid = self._job("QA Manager", "QA Manager role.")
+        mid = db.insert_match(c["id"], jid, 70.0, {}, [])
+        aid = db.insert_application(mid, None) if hasattr(db, "insert_application") else None
+        if aid is None:
+            # fall back to direct insert matching the schema
+            with db.get_conn() as conn:
+                cur = conn.execute(
+                    'INSERT INTO applications(match_id, status, updated_at) VALUES (?, ?, ?)',
+                    (mid, "queued", "2020-01-01T00:00:00+00:00"))
+                conn.commit()
+                aid = cur.lastrowid
+        got = office._watchdog(db.get_settings())
+        self.assertEqual(got["stale"], 1)
+        self.assertEqual(len(got["actions"]), 1)
+        with db.get_conn() as conn:
+            notes = conn.execute("SELECT notes FROM applications WHERE id=?",
+                                 (aid,)).fetchone()["notes"]
+        self.assertIn("[Watchdog]", notes)
+        # second run: no duplicate note, no duplicate action
+        got2 = office._watchdog(db.get_settings())
+        self.assertEqual(got2["actions"], [])
+        with db.get_conn() as conn:
+            notes2 = conn.execute("SELECT notes FROM applications WHERE id=?",
+                                  (aid,)).fetchone()["notes"]
+        self.assertEqual(notes2.count("[Watchdog]"), 1)
 
     def test_run_office_includes_all_six_agents(self):
         self._consultant()

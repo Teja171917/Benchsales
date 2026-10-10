@@ -114,8 +114,10 @@ def _pattern(skill: str) -> re.Pattern:
     if skill not in _COMPILED:
         # (?<![...]) guards avoid matching inside longer tokens, e.g. "java"
         # inside "javascript"; also handles symbols like c++, c#, .net, ci/cd.
+        # Note: "." is only in the lookbehind, not the lookahead - a trailing
+        # period is a sentence end ("knows Playwright.") and must still match.
         _COMPILED[skill] = re.compile(
-            r"(?<![A-Za-z0-9_+#.\-/])" + re.escape(skill) + r"(?![A-Za-z0-9_+#.\-/])"
+            r"(?<![A-Za-z0-9_+#.\-/])" + re.escape(skill) + r"(?![A-Za-z0-9_+#\-/])"
         )
     return _COMPILED[skill]
 

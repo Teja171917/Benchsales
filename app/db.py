@@ -34,6 +34,7 @@ DEFAULT_SETTINGS = {
     # Adzuna's default key allows 250 calls/day and 2,500/month; stay under it
     "adzuna_daily_budget": "80",
     "search_queries": json.dumps(DEFAULT_SEARCH_QUERIES),
+    "office_autopilot": "1",
     "enabled_sources": json.dumps(DEFAULT_ENABLED_SOURCES),
     "adzuna_app_id": "",
     "adzuna_app_key": "",
@@ -166,6 +167,8 @@ def init_db() -> None:
         if "user_confirmed_skills_json" not in _columns(conn, "tailored_resumes"):
             conn.execute("ALTER TABLE tailored_resumes "
                          "ADD COLUMN user_confirmed_skills_json TEXT DEFAULT '[]'")
+        if "compliance_flag" not in _columns(conn, "matches"):
+            conn.execute('ALTER TABLE "matches" ADD COLUMN compliance_flag INTEGER DEFAULT 0')
         # backfill employment tags for jobs saved before tagging existed
         for r in conn.execute("SELECT id, employment_type, title, description "
                               "FROM jobs WHERE emp_tags IS NULL").fetchall():
@@ -629,6 +632,25 @@ def list_outreach_drafts(limit: int = 50) -> list:
             'FROM outreach_drafts d JOIN "matches" m ON m.id=d.match_id '
             'JOIN jobs j ON j.id=m.job_id JOIN consultants c ON c.id=m.consultant_id '
             'ORDER BY d.id DESC LIMIT ?', (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ---- compliance quarantine ----
+def set_compliance_flag(mid: int, flag: int) -> None:
+    with get_conn() as conn:
+        conn.execute('UPDATE "matches" SET compliance_flag=? WHERE id=?',
+                     (1 if flag else 0, mid))
+        conn.commit()
+
+
+def list_quarantined(limit: int = 50) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            'SELECT m.*, j.title AS job_title, j.company, j.location, '
+            'c.name AS consultant_name FROM "matches" m '
+            'JOIN jobs j ON j.id=m.job_id JOIN consultants c ON c.id=m.consultant_id '
+            'WHERE m.compliance_flag=1 ORDER BY m.score DESC LIMIT ?',
+            (limit,)).fetchall()
         return [dict(r) for r in rows]
 
 

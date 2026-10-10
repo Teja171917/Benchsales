@@ -1091,20 +1091,29 @@ async function renderOverview() {
 const AGENT_INFO = {
   scout: {name: "Scout", desc: "Watches the board for fresh matches above your threshold, grouped per consultant."},
   tailor: {name: "Tailor", desc: "Pre-drafts tailored resumes for top matches (score 85+). Drafts only — flagged skills need your review before anything is queued."},
-  watchdog: {name: "Watchdog", desc: "Flags pipeline going cold: queued items with no action, applications with no update."},
-  market_analyst: {name: "Market Analyst", desc: "Per-consultant demand briefing from live postings: which of their skills are hot, and which in-demand skills they're missing."},
+  watchdog: {name: "Watchdog", desc: "Flags pipeline going cold. On autopilot it also leaves follow-up reminders on stale applications."},
+  market_analyst: {name: "Market Analyst", desc: "Per-consultant demand briefing from live postings. On autopilot it adds search queries for hot skills the bench doesn't cover."},
   outreach: {name: "Outreach", desc: "Drafts submission emails for top matches (score 80+). Drafts only — a human always sends."},
-  compliance: {name: "Compliance", desc: "Flags employment-type conflicts before you apply, e.g. C2C consultant vs a W2-only posting."},
+  compliance: {name: "Compliance", desc: "Flags employment-type conflicts before you apply. On autopilot it quarantines mismatches — reversible from here."},
 };
 async function renderOffice() {
   const el = $("#tab-office");
   el.innerHTML = `
     <div class="row spread"><div><h2 style="margin-bottom:2px">Agent Office</h2>
       <div class="muted">Six agents working your pipeline around the clock — runs automatically every day.</div></div>
-      <button class="btn primary" id="of-run">Run the office now</button></div>
-    <div class="stats" id="of-stats" style="margin-top:14px">${skelCards(4)}</div>
-    <div class="dash-grid" id="of-agents">${skelCards(3)}</div>
+      <div class="row" style="gap:10px;align-items:center">
+        <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer" title="When on, agents fix safe issues themselves (quarantine mismatches, expand search queries, leave follow-up reminders). They never send email, queue applications, or acknowledge resume skills.">
+          <input type="checkbox" id="of-autopilot"> Autopilot</label>
+        <button class="btn primary" id="of-run">Run the office now</button></div></div>
+    <div class="stats" id="of-stats" style="margin-top:14px">${skelCards(6)}</div>
+    <div class="dash-grid" id="of-agents">${skelCards(6)}</div>
     <div id="of-briefing">${skelRows(4)}</div>`;
+  $("#of-autopilot").onchange = async (e) => {
+    try {
+      await api("/api/office/autopilot", {method: "POST", body: JSON.stringify({enabled: e.target.checked})});
+      toast(e.target.checked ? "Autopilot on — agents will fix safe issues themselves" : "Autopilot off — agents will only report", "ok");
+    } catch (err) { toast("Couldn't save autopilot setting: " + err.message, "err"); e.target.checked = !e.target.checked; }
+  };
   $("#of-run").onclick = async () => {
     const b = $("#of-run");
     b.disabled = true; b.textContent = "Office is working…";
@@ -1130,6 +1139,8 @@ async function renderOffice() {
     return;
   }
   const A = br.agents || {};
+  const auto = br.autopilot !== false;
+  $("#of-autopilot").checked = auto;
   const scout = A.scout || {new_matches: 0, by_consultant: {}};
   const tailor = A.tailor || {drafted: 0, drafts: []};
   const wd = A.watchdog || {stale: 0, items: []};
@@ -1159,12 +1170,23 @@ async function renderOffice() {
       : k === "market_analyst" ? `${mkt.consultants.length} consultants briefed`
       : k === "outreach" ? `${out.drafted} drafts ready`
       : `${comp.issues} issues flagged`;
-    return `<div class="card"><h3>${info.name}</h3>
+    return `<div class="card"><h3>${info.name} ${auto ? `<span class="chip" title="Autopilot is on — this agent fixes safe issues itself">AUTO</span>` : ""}</h3>
       <div class="muted" style="margin-bottom:8px">${info.desc}</div>
       <div><b>${esc(res)}</b> <span class="muted">· last run ${esc(ago(br.run_at))}</span></div></div>`;
   }).join("");
 
+  const acts = [];
+  for (const k of ["scout", "tailor", "watchdog", "market_analyst", "outreach", "compliance"]) {
+    for (const a of ((A[k] || {}).actions || [])) acts.push({agent: AGENT_INFO[k].name, text: a.text});
+  }
   const secs = [];
+  secs.push(`<div class="card"><h3>Agent actions <span class="muted" style="font-weight:normal">· what the agents fixed by themselves</span></h3>
+    ${acts.length ? acts.map((a) => `
+      <div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)">
+        <span class="badge">${esc(a.agent)}</span><div>${esc(a.text)}</div></div>`).join("")
+      : `<div class="muted" style="margin-top:8px">${auto
+          ? "No autonomous fixes this run — everything the agents checked was already healthy."
+          : "Autopilot is off — the agents reported their findings but changed nothing. Turn it on to let them fix safe issues."}</div>`}</div>`);
   const consultants = Object.keys(scout.by_consultant || {});
   secs.push(`<div class="card"><div class="row spread"><h3 style="margin:0">New matches in the last 24 hours</h3>
     ${consultants.length ? `<button class="btn" id="of-allm">Open matches</button>` : ""}</div>
@@ -1219,10 +1241,12 @@ async function renderOffice() {
 
   secs.push(`<div class="card"><h3>Compliance flags</h3>
     ${(comp.items || []).length ? comp.items.map((c) => `
-      <div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">
-        <span class="chip warn">${esc(c.issue)}</span>
+      <div class="row spread" style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <div class="row" style="gap:8px"><span class="chip warn">${esc(c.issue)}</span>
         <div><b>${esc(c.job_title)}</b> <span class="muted">· ${esc(c.company)} · for ${esc(c.consultant_name)} · score ${c.score}</span>
-          <div class="muted">${esc(c.detail)}</div></div>
+          <div class="muted">${esc(c.detail)}</div>
+          ${c.quarantined ? `<div class="muted" style="margin-top:2px">Quarantined by Compliance — hidden from new matches.</div>` : ""}</div></div>
+        ${c.quarantined ? `<button class="btn" data-unquar="${c.match_id}">Restore</button>` : ""}
       </div>`).join("")
       : `<div class="muted" style="margin-top:8px">No conflicts — employment types line up on current matches.</div>`}</div>`);
 
@@ -1250,6 +1274,14 @@ async function renderOffice() {
     } catch (e) {
       toast("Copy failed — select the preview text manually", "err");
     }
+  });
+  $$("[data-unquar]", el).forEach((b) => b.onclick = async () => {
+    b.disabled = true;
+    try {
+      await api(`/api/matches/${b.dataset.unquar}/unquarantine`, {method: "POST"});
+      toast("Match restored", "ok");
+    } catch (e) { toast("Restore failed: " + e.message, "err"); }
+    renderOffice(); refreshBadges();
   });
   $$("[data-draftm]", el).forEach((b) => b.onclick = () => { go("matches"); });
 }

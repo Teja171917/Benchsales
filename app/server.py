@@ -164,6 +164,22 @@ def api_office_drafts(limit: int = 50):
     never sends email itself."""
     return db.list_outreach_drafts(max(1, min(limit, 200)))
 
+
+@app.post("/api/office/autopilot")
+def api_office_autopilot(payload: dict):
+    """Toggle autopilot: agents fix safe issues themselves (on) or only
+    report them (off)."""
+    enabled = bool(payload.get("enabled", True))
+    db.set_setting("office_autopilot", "1" if enabled else "0")
+    return {"autopilot": enabled}
+
+
+@app.post("/api/matches/{mid}/unquarantine")
+def api_unquarantine(mid: int):
+    """Restore a match quarantined by the Compliance agent."""
+    db.set_compliance_flag(mid, 0)
+    return {"ok": True}
+
 def _kick_collect():
     """Start a collection in the background unless one is already running
     (used right after a resume upload so new jobs for that person arrive
