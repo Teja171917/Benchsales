@@ -178,7 +178,7 @@ async function renderConsultants() {
       </label>
       <button class="btn" id="c-add">Add consultant</button>
     </span></div>
-    <div class="muted" id="c-bulkmsg" style="margin-bottom:8px">Tip: <b>Add resumes</b> takes any number of resumes. The AI reads each one, double-checks it, and adds the consultant. Only resumes it is unsure about are marked <b>Needs a quick check</b>.</div>
+    <div class="muted" id="c-bulkmsg"></div>
     <div id="c-list" class="grid">${skelCards(3)}</div>`;
   $("#c-add").onclick = () => consultantModal(null);
   $("#c-add").onclick = () => consultantModal(null);
@@ -222,8 +222,7 @@ async function renderConsultants() {
         <div style="margin-top:6px"><button class="btn" data-checked="${c.id}">Looks right</button>
         <button class="btn" data-edit="${c.id}">Fix it</button></div></div>` : ""}
       <div class="muted">${esc(c.location)}${c.visa_status ? " · " + esc(c.visa_status) : ""}</div>
-      <div class="muted">Open to: ${c.emp_pref ? c.emp_pref.split(",").map((t) => esc(EMP_LABEL[t] || t)).join(", ") : "any engagement type"}</div>
-      <div class="muted">${esc(c.email)}${c.phone ? " · " + esc(c.phone) : ""}</div>
+      ${c.email || c.phone ? `<div class="muted">${[c.email, c.phone].filter(Boolean).map(esc).join(" · ")}</div>` : ""}
       <div style="margin:8px 0">
         ${c.has_resume
           ? `<span class="badge fname" title="${esc(c.resume_filename)}">resume: ${esc(c.resume_filename)}</span>
