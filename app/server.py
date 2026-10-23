@@ -38,8 +38,13 @@ async def auth_gate(request: Request, call_next):
         if auth.startswith("Basic "):
             try:
                 decoded = base64.b64decode(auth[6:]).decode("utf-8", "ignore")
-                _, _, given = decoded.partition(":")
-                ok = secrets.compare_digest(given, pwd)
+                user, _, given = decoded.partition(":")
+                ok = secrets.compare_digest(given.encode(), pwd.encode())
+                # optional fixed username (Replit Secret BENCHPILOT_USERNAME)
+                want_user = os.environ.get("BENCHPILOT_USERNAME", "")
+                if want_user:
+                    ok = ok and secrets.compare_digest(
+                        user.strip().lower().encode(), want_user.strip().lower().encode())
             except Exception:
                 ok = False
         if not ok:
