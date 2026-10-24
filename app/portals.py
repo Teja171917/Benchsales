@@ -53,6 +53,9 @@ def build_links(title: str, location: str = "", emp: list[str] | None = None,
     """Return [{id, label, url, note}] for every portal."""
     emp = emp or []
     q = quote_plus(title.strip())
+    if location.strip().lower().strip(".") in {"usa", "us", "u.s", "u.s.a", "united states",
+                                               "united states of america", "america"}:
+        location = ""          # whole country -> handled as United States below
     loc = quote_plus(location.strip())
     # Blank location: say "United States" - otherwise the portal guesses from
     # the visitor's IP address (e.g. Hyderabad, India).
@@ -96,8 +99,16 @@ def build_links(title: str, location: str = "", emp: list[str] | None = None,
     zip_ = (f"https://www.ziprecruiter.com/jobs-search?search={q}"
             f"&location={us_loc}")
 
-    glass = (f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={q}"
-             f"&locKeyword={us_loc}")
+    # Glassdoor sends Indian visitors to glassdoor.co.in unless the link names
+    # the country itself: IN1 = United States in Glassdoor's own link format.
+    if location.strip():
+        glass = (f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={q}"
+                 f"&locKeyword={loc}&locT=N&locId=1")
+    else:
+        kw = "-".join(title.strip().lower().split()) or "jobs"
+        kw = "".join(ch for ch in kw if ch.isalnum() or ch == "-")
+        glass = (f"https://www.glassdoor.com/Job/united-states-{kw}-jobs-"
+                 f"SRCH_IL.0,13_IN1_KO14,{14 + len(kw)}.htm")
 
     monster = (f"https://www.monster.com/jobs/search?q={q}"
                f"&where={us_loc}")

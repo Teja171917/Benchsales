@@ -100,8 +100,12 @@ class PortalTests(unittest.TestCase):
 
     def test_blank_location_means_united_states(self):
         links = {l["id"]: l["url"] for l in portals.build_links("qa", "", ["c2c"], 7)}
-        for pid in ("indeed", "linkedin", "ziprecruiter", "glassdoor", "monster"):
+        for pid in ("indeed", "linkedin", "ziprecruiter", "monster"):
             self.assertIn("United", links[pid], pid)
+        self.assertIn("united-states-qa-jobs-SRCH_IL.0,13_IN1_KO14,16", links["glassdoor"])
+        usa = {l["id"]: l["url"] for l in portals.build_links("QA Engineer", "USA", [], 7)}
+        self.assertIn("united-states-qa-engineer-jobs-SRCH_IL.0,13_IN1_KO14,25", usa["glassdoor"])
+        self.assertIn("l=United+States", usa["indeed"])
         self.assertNotIn("C2C", links["ziprecruiter"])
         self.assertIn("site%3Alensa.com", links["lensa"])
         self.assertIn("United+States", links["lensa"])
