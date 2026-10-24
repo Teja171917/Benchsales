@@ -51,7 +51,12 @@ async def auth_gate(request: Request, call_next):
             return JSONResponse({"detail": "authentication required"},
                                 status_code=401,
                                 headers={"WWW-Authenticate": 'Basic realm="BenchPilot"'})
-    return await call_next(request)
+    response = await call_next(request)
+    # make browsers re-check the page files, so an update shows without Ctrl+Shift+R
+    path = request.url.path
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.on_event("startup")
@@ -629,7 +634,28 @@ def api_live_search(data: dict):
         return (hit_title / len(words), hit_all / len(words))
 
     jobs.sort(key=_relevance, reverse=True)
+    jobs = mix_sources(jobs, _relevance)
     return {"jobs": jobs, "sources": sources}
+
+
+def mix_sources(jobs: list, key) -> list:
+    """Within jobs of equal relevance, take turns between sources (Dice,
+    Adzuna, JSearch...) so one board does not fill the whole first page."""
+    out, i = [], 0
+    while i < len(jobs):
+        j = i
+        while j < len(jobs) and key(jobs[j]) == key(jobs[i]):
+            j += 1
+        group, by_src = jobs[i:j], {}
+        for job in group:
+            by_src.setdefault(job.get("source", ""), []).append(job)
+        queues = list(by_src.values())
+        while any(queues):
+            for q in queues:
+                if q:
+                    out.append(q.pop(0))
+        i = j
+    return out
 
 
 @app.post("/api/jobs/save-live")
