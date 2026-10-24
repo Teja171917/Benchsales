@@ -1230,6 +1230,19 @@ class DiceConnectorTests(unittest.TestCase):
         self.assertFalse(dice.enabled({"dice_enabled": "0"}))
 
 
+class LiveSearchRelevanceTests(unittest.TestCase):
+    def test_only_jobs_about_the_search_are_shown(self):
+        from app.relevance import title_fits
+        q = "QA Automation Engineer"
+        for ok in ("QA Automation Engineer", "Senior Test Automation Engineer",
+                   "SDET - Automation", "Quality Assurance Automation Lead"):
+            self.assertTrue(title_fits(q, ok), ok)
+        for bad in ("Frontend Engineer", "QA Supervisor", "Inside Sales Contractor"):
+            self.assertFalse(title_fits(q, bad), bad)
+        self.assertTrue(title_fits("Java Developer", "Sr. Java Developer (C2C)"))
+        self.assertFalse(title_fits("Java Developer", "Python Developer"))
+
+
 class RoleFitTests(unittest.TestCase):
     def test_fits_role_rule(self):
         self.assertTrue(matcher.fits_role({"title": 20, "skill": 50}))

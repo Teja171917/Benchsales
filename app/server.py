@@ -16,6 +16,7 @@ from app import autolearn, contact as contact_mod, db, emptype, market, portals,
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
+from app.relevance import title_fits
 from app import persist, resume_ai, resume_import
 from app import tailor as tailor_mod
 from app.skills import display_name, extract_skills
@@ -618,6 +619,7 @@ def api_live_search(data: dict):
             if emp_wanted:
                 fetched = [j for j in fetched if emptype.matches_filter(
                     j["emp_tags"], emp_wanted, include_unspecified)]
+            fetched = [j for j in fetched if title_fits(title, j.get("title", ""))]
             fetched = fetched[:30]
             jobs.extend(fetched)
             sources[name] = {"label": label, "status": "ok", "count": len(fetched)}
