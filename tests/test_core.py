@@ -1263,6 +1263,28 @@ class JSearchBudgetTests(unittest.TestCase):
             tmp.cleanup()
 
 
+class JSearchAnswerTests(unittest.TestCase):
+    ROW = {"job_id": "a1", "job_title": "QA Automation Engineer", "employer_name": "Acme",
+           "job_city": "Austin", "job_state": "TX", "job_is_remote": True,
+           "job_apply_link": "https://x/apply", "job_publisher": "LinkedIn",
+           "job_employment_type": "CONTRACTOR", "job_description": "Selenium"}
+
+    def test_both_answer_shapes_work(self):
+        from app.sources import jsearch
+        self.assertEqual(len(jsearch.job_rows({"data": [self.ROW]})), 1)
+        self.assertEqual(len(jsearch.job_rows({"status": "OK", "data": {"jobs": [self.ROW],
+                                                                         "cursor": "x"}})), 1)
+        self.assertEqual(jsearch.job_rows({"data": "nothing"}), [])
+
+    def test_job_shows_where_it_was_posted(self):
+        from app.sources import jsearch
+        j = jsearch.to_job(self.ROW)
+        self.assertEqual((j["source"], j["location"], j["company"]),
+                         ("linkedin", "Austin, TX", "Acme"))
+        self.assertEqual(jsearch.to_job({**self.ROW, "job_publisher": "Indeed"})["source"], "indeed")
+        self.assertEqual(jsearch.to_job({**self.ROW, "job_publisher": "Acme Careers"})["source"], "jsearch")
+
+
 class RoleFitTests(unittest.TestCase):
     def test_fits_role_rule(self):
         self.assertTrue(matcher.fits_role({"title": 20, "skill": 50}))
