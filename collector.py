@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 
 from app import autolearn, db, usa
 from app import matcher
-from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice
+from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster
 
-SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice]
+SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster]
 
 
 def jsearch_room(settings: dict) -> tuple[int, int]:
@@ -78,12 +78,16 @@ def run() -> dict:
         name = mod.NAME
         st = {"label": getattr(mod, "LABEL", name), "status": "skipped",
               "jobs": 0, "new": 0}
+        if name == "monster" and mod.enabled(settings):
+            enabled_sources.add("monster")    # an Apify token means "use Monster"
         if name == "dice" and mod.enabled(settings):
             enabled_sources.add("dice")       # free official connector: on by default
         if name not in enabled_sources:
             st["status"] = "disabled in settings"
         elif not mod.enabled(settings):
             st["status"] = "not configured (missing credentials)"
+        elif name == "monster" and not mod.due(settings):
+            st["status"] = f"waiting (Monster runs every {mod.every_hours(settings)} h to keep the cost low)"
         else:
             try:
                 fetched = 0
@@ -92,6 +96,8 @@ def run() -> dict:
                 run_queries = queries
                 if name == "adzuna":
                     run_queries = _within_budget(queries, summary)
+                if name == "monster":
+                    db.set_setting("monster_last_run_at", datetime.now(timezone.utc).isoformat())
                 if name == "jsearch":   # free plan: 200 calls a month
                     room, _ = jsearch_room(settings)
                     start = db.usage_month("jsearch") % max(1, len(queries))

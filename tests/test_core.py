@@ -1285,6 +1285,53 @@ class JSearchAnswerTests(unittest.TestCase):
         self.assertEqual(jsearch.to_job({**self.ROW, "job_publisher": "Acme Careers"})["source"], "jsearch")
 
 
+class MonsterTests(unittest.TestCase):
+    def test_input_and_output(self):
+        from app.sources import monster
+        b = monster.build_input({"title": "QA Automation", "location": "Remote"}, {})
+        self.assertEqual(b, {"query": "QA Automation", "country": "US", "maxResults": 30,
+                             "location": "Remote"})
+        self.assertNotIn("location", monster.build_input({"title": "QA", "location": "USA"}, {}))
+        j = monster.to_job({"jobId": "m1", "title": "SDET", "company": "Acme",
+                            "city": "Dallas", "state": "TX", "isRemote": False,
+                            "url": "https://www.monster.com/job-openings/m1",
+                            "salaryMin": 50, "salaryMax": 60, "postedDate": "2026-10-20"})
+        self.assertEqual((j["source"], j["location"], j["salary"]), ("monster", "Dallas, TX", "$50 - $60"))
+        self.assertIsNone(monster.to_job({"title": "x"}))
+
+    def test_collector_runs_monster_then_waits(self):
+        import collector
+        from app.sources import monster
+        tmp = tempfile.TemporaryDirectory()
+        old_db, old_fetch = db.DB_PATH, monster.fetch
+        db.DB_PATH = Path(tmp.name) / "mo.db"
+        calls = []
+
+        def fake(q, settings):
+            calls.append(q["title"])
+            return [{"source": "monster", "source_id": "1", "title": "SDET", "company": "A",
+                     "location": "Remote", "remote_flag": True, "url": "https://m/1",
+                     "description": "selenium", "posted_at": "", "salary": "",
+                     "employment_type": ""}]
+        try:
+            db.init_db()
+            db.set_setting("apify_token", "apify_api_test")
+            db.set_setting("enabled_sources", "[]")
+            db.set_setting("dice_enabled", "0")
+            db.set_setting("auto_queries", "0")
+            db.set_setting("search_queries", json.dumps([{"title": "SDET", "location": "Remote"}]))
+            monster.fetch = fake
+            s1 = collector.run()
+            self.assertEqual(s1["sources"]["monster"]["new"], 1)
+            s2 = collector.run()
+            self.assertIn("waiting", s2["sources"]["monster"]["status"])
+            self.assertEqual(calls, ["SDET"])
+        finally:
+            monster.fetch = old_fetch
+            db.DB_PATH = old_db
+            tmp.cleanup()
+
+
 class RoleFitTests(unittest.TestCase):
     def test_fits_role_rule(self):
         self.assertTrue(matcher.fits_role({"title": 20, "skill": 50}))

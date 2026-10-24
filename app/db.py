@@ -224,6 +224,7 @@ ENV_SETTINGS = {
     "adzuna_app_id": "ADZUNA_APP_ID", "adzuna_app_key": "ADZUNA_APP_KEY",
     "rapidapi_key": "RAPIDAPI_KEY", "llm_base_url": "LLM_BASE_URL",
     "llm_api_key": "LLM_API_KEY", "llm_model": "LLM_MODEL",
+    "apify_token": "APIFY_TOKEN",
 }
 
 

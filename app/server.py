@@ -20,12 +20,12 @@ from app.relevance import title_fits
 from app import persist, resume_ai, resume_import
 from app import tailor as tailor_mod
 from app.skills import display_name, extract_skills
-from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, urlimport
+from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster, urlimport
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice]
+SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster]
 
 app = FastAPI(title="BenchPilot", version="1.0")
 
@@ -800,7 +800,7 @@ def api_update_application(aid: int, data: dict):
 
 
 # ---------- settings / sources ----------
-MASKED_KEYS = {"adzuna_app_key", "rapidapi_key", "llm_api_key", "google_api_key"}
+MASKED_KEYS = {"adzuna_app_key", "rapidapi_key", "llm_api_key", "google_api_key", "apify_token"}
 
 
 def _mask(key: str, value: str) -> str:
@@ -853,6 +853,11 @@ def api_sources_status():
             state = "ready (Dice official connector, free)" if configured else "disabled in settings"
             if configured:
                 enabled_sources = set(enabled_sources) | {"dice"}
+        elif name == "monster":
+            state = ("ready (via Apify, every 12 h, in the automatic collection)" if configured
+                     else "needs an Apify token (Replit Secret APIFY_TOKEN)")
+            if configured:
+                enabled_sources = set(enabled_sources) | {"monster"}
         elif name in enabled_sources:
             state = "ready" if configured else "needs credentials"
         out.append({
