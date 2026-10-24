@@ -88,8 +88,7 @@ class PortalTests(unittest.TestCase):
         links = {l["id"]: l["url"] for l in
                  portals.build_links("Java Developer", "Houston, TX",
                                      ["fulltime", "c2c", "w2"], 7)}
-        for pid in ("dice", "indeed", "linkedin", "glassdoor", "monster", "careerbuilder",
-                    "ziprecruiter", "lensa"):
+        for pid in ("dice", "indeed", "linkedin", "glassdoor", "monster", "ziprecruiter"):
             self.assertIn(pid, links)
             self.assertTrue(links[pid].startswith("https://"))
         self.assertIn("Java+Developer", links["dice"])
@@ -107,8 +106,8 @@ class PortalTests(unittest.TestCase):
         self.assertIn("united-states-qa-engineer-jobs-SRCH_IL.0,13_IN1_KO14,25", usa["glassdoor"])
         self.assertIn("l=United+States", usa["indeed"])
         self.assertNotIn("C2C", links["ziprecruiter"])
-        self.assertIn("site%3Alensa.com", links["lensa"])
-        self.assertIn("United+States", links["lensa"])
+        self.assertNotIn("lensa", links)
+        self.assertNotIn("careerbuilder", links)
 
 
 class DbTests(unittest.TestCase):
@@ -1117,6 +1116,118 @@ class EnvSettingsTests(unittest.TestCase):
             os.environ.clear(); os.environ.update(env)
             db.DB_PATH = old
             tmp.cleanup()
+
+
+class DiceConnectorTests(unittest.TestCase):
+    SCHEMA = {"type": "object", "required": ["keyword"], "properties": {
+        "keyword": {"type": "string"},
+        "location": {"type": "string"},
+        "workplace_types": {"type": "array", "items": {"enum": ["Remote", "On-Site", "Hybrid"]}},
+        "employment_types": {"type": "array", "items": {"enum": ["FULLTIME", "PARTTIME", "CONTRACTS", "THIRD_PARTY"]}},
+        "posted_date": {"type": "string", "enum": ["ONE", "THREE", "SEVEN"]},
+        "page_size": {"type": "integer", "maximum": 100}}}
+
+    def test_arguments_follow_the_tools_own_schema(self):
+        from app.sources import dice
+        a = dice.build_args(self.SCHEMA, {"title": "QA Automation", "location": "Remote"},
+                            {"collect_emp_types": "c2c,w2,fulltime"})
+        self.assertEqual(a["keyword"], "QA Automation")
+        self.assertNotIn("location", a)
+        self.assertEqual(a["workplace_types"], ["Remote"])
+        self.assertEqual(set(a["employment_types"]), {"FULLTIME", "CONTRACTS", "THIRD_PARTY"})
+        self.assertEqual(a["posted_date"], "SEVEN")
+        self.assertEqual(a["page_size"], 50)
+        b = dice.build_args(self.SCHEMA, {"title": "QA", "location": "Dallas, TX"}, {})
+        self.assertEqual(b["location"], "Dallas, TX")
+        self.assertNotIn("workplace_types", b)
+
+    def test_other_parameter_names_still_work(self):
+        from app.sources import dice
+        a = dice.build_args({"properties": {"query": {"type": "string"},
+                                            "remote": {"type": "boolean"}}},
+                            {"title": "SDET", "location": ""}, {})
+        self.assertEqual(a, {"query": "SDET", "remote": True})
+
+    def test_answer_is_turned_into_jobs(self):
+        from app.sources import dice
+        payload = {"data": [{"id": "abc-123", "title": "QA Automation Engineer",
+                             "companyName": "Acme", "detailsPageUrl": "https://www.dice.com/job-detail/abc-123",
+                             "jobLocation": {"displayName": "Austin, TX"},
+                             "workplaceTypes": ["Remote"], "employmentType": "Contract",
+                             "summary": "Selenium, Java", "postedDate": "2026-10-20"},
+                            {"id": "x", "title": ""}], "meta": {"total": 2}}
+        res = {"content": [{"type": "text", "text": json.dumps(payload)}]}
+        jobs = dice.parse_result(res)
+        self.assertEqual(len(jobs), 1)
+        j = jobs[0]
+        self.assertEqual((j["source"], j["company"], j["location"]), ("dice", "Acme", "Austin, TX"))
+        self.assertTrue(j["remote_flag"])
+        self.assertTrue(j["url"].startswith("https://www.dice.com/"))
+        self.assertEqual(dice.parse_result({"structuredContent": {"jobs": [
+            {"jobTitle": "SDET", "url": "/job-detail/9"}]}})[0]["url"],
+            "https://www.dice.com/job-detail/9")
+
+    def test_unknown_answer_shows_a_useful_error(self):
+        from app.sources import dice
+        with self.assertRaises(RuntimeError) as cm:
+            dice.parse_result({"content": [{"type": "text", "text": "Here are some jobs: none"}]})
+        self.assertIn("unexpected format", str(cm.exception))
+
+    def test_event_stream_answers_are_read(self):
+        from app.sources import dice
+        txt = 'event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"tools":[]}}\n\n'
+        self.assertEqual(dice._parse_rpc(txt, "text/event-stream", 2)["result"], {"tools": []})
+
+    def test_full_conversation_with_a_fake_dice(self):
+        from app.sources import dice
+        schema = self.SCHEMA
+
+        class R:
+            def __init__(self, body, ctype="application/json"):
+                self.text, self.status_code = json.dumps(body), 200
+                self.headers = {"Content-Type": ctype, "Mcp-Session-Id": "s1"}
+            def raise_for_status(self): pass
+
+        sent = []
+
+        def post(url, data=None, timeout=None):
+            msg = json.loads(data)
+            sent.append(msg)
+            m = msg.get("method")
+            if m == "initialize":
+                return R({"jsonrpc": "2.0", "id": msg["id"], "result": {"capabilities": {}}})
+            if m == "tools/list":
+                return R({"jsonrpc": "2.0", "id": msg["id"], "result": {"tools": [
+                    {"name": "get_company"}, {"name": "search_jobs", "inputSchema": schema}]}})
+            if m == "tools/call":
+                return R({"jsonrpc": "2.0", "id": msg["id"], "result": {"content": [
+                    {"type": "text", "text": json.dumps({"data": [
+                        {"id": "1", "title": "SDET", "companyName": "B",
+                         "detailsPageUrl": "https://www.dice.com/job-detail/1"}]})}]}})
+            return R({})
+        old = dice.requests.Session
+        fake_post = post
+
+        class FakeSession:
+            def __init__(self):
+                self.headers = {}
+
+            def post(self, url, data=None, timeout=None):
+                return fake_post(url, data=data, timeout=timeout)
+        dice.requests.Session = FakeSession
+        try:
+            jobs = dice.fetch({"title": "SDET", "location": "Remote"}, {})
+        finally:
+            dice.requests.Session = old
+        self.assertEqual([j["title"] for j in jobs], ["SDET"])
+        call = [m for m in sent if m.get("method") == "tools/call"][0]
+        self.assertEqual(call["params"]["name"], "search_jobs")
+        self.assertEqual(call["params"]["arguments"]["keyword"], "SDET")
+
+    def test_on_by_default_and_can_be_turned_off(self):
+        from app.sources import dice
+        self.assertTrue(dice.enabled({}))
+        self.assertFalse(dice.enabled({"dice_enabled": "0"}))
 
 
 class RoleFitTests(unittest.TestCase):

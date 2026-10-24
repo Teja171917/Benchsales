@@ -66,6 +66,8 @@ def run() -> dict:
         name = mod.NAME
         st = {"label": getattr(mod, "LABEL", name), "status": "skipped",
               "jobs": 0, "new": 0}
+        if name == "dice" and mod.enabled(settings):
+            enabled_sources.add("dice")       # free official connector: on by default
         if name not in enabled_sources:
             st["status"] = "disabled in settings"
         elif not mod.enabled(settings):

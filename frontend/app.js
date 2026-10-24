@@ -375,15 +375,13 @@ async function renderJobs() {
       <b>Employment type</b>
       <span class="chiprow" id="j-emp">${empChips(jobsFilter.emp, "data-jemp")}</span>
       <label class="fcheck"><input type="checkbox" id="j-unspec"${jobsFilter.unspec ? " checked" : ""}> include jobs with no type listed</label></div>
-      <div class="muted" style="margin-top:6px">USA market. Applies to live search, portal links and the job board below. A job counts as C2C / W2 when its type or description says so (and "no C2C" / "W2 only" are understood).</div></div>
+      <div class="muted" style="margin-top:6px">USA market. Applies to live search and the job board below. A job counts as C2C / W2 when its type or description says so (and "no C2C" / "W2 only" are understood).</div></div>
     <div class="card"><h3>Live job search</h3>
       <div class="muted" style="margin-bottom:8px">Type a job title — BenchPilot searches the boards right now and shows listings instantly.</div>
       <div class="row">
         <input type="text" id="j-live-title" placeholder="job title, e.g. AI test engineer" style="flex:2;min-width:220px">
         <input type="text" id="j-live-loc" placeholder="location, e.g. Texas (optional)" style="flex:1;min-width:160px">
-        <button class="btn primary" id="j-live-go">Search live</button>
-        <button class="btn" id="j-portal-go" title="Open Dice, Indeed, LinkedIn... with this search pre-filled">Portal links</button></div>
-      <div id="j-portals" style="margin-top:8px"></div>
+        <button class="btn primary" id="j-live-go">Search live</button></div>
       <div id="j-live-status" class="muted" style="margin-top:6px"></div>
       <div id="j-live-results" style="margin-top:8px"></div></div>
     <div class="card"><h3>Import a posting URL</h3>
@@ -503,20 +501,6 @@ async function renderJobs() {
     } catch (e) { st.textContent = "error: " + e.message; }
   };
   $("#j-live-go").onclick = doLiveSearch;
-  /* portal deep links (Dice, Indeed, LinkedIn...) */
-  $("#j-portal-go").onclick = async () => {
-    const title = $("#j-live-title").value.trim();
-    const box = $("#j-portals");
-    if (!title) { box.innerHTML = `<span class="muted">Type a job title first.</span>`; return; }
-    try {
-      const qs = new URLSearchParams({title, location: $("#j-live-loc").value.trim(),
-        emp: jobsFilter.emp.join(","), days: "7"});
-      const links = await api("/api/portals?" + qs);
-      box.innerHTML = `<div class="muted" style="margin-bottom:6px">Opens in a new tab with your search and employment-type filters pre-filled. Sign in to each portal in your own browser. (Dice, Indeed and LinkedIn block automated collection, so these are the reliable way in.)</div>
-        <div class="row" style="flex-wrap:wrap">${links.map((l) =>
-          `<a class="btn" href="${esc(l.url)}" target="_blank" rel="noopener" title="${esc(l.note)}">${esc(l.label)}</a>`).join("")}</div>`;
-    } catch (e) { box.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
-  };
   $("#j-live-title").onkeydown = (e) => { if (e.key === "Enter") doLiveSearch(); };
   $("#j-live-loc").onkeydown = (e) => { if (e.key === "Enter") doLiveSearch(); };
   $("#j-live-results").addEventListener("click", (e) => {
@@ -917,7 +901,7 @@ async function renderSettings() {
         return `<div class="srcstat"><span class="dot ${dot}"></span>
           <b>${esc(x.label)}</b><span class="muted">${esc(x.state)}${last}</span></div>`;
       }).join("")}
-      <div class="muted" style="margin-top:8px">Dice, Indeed and LinkedIn block automated collection (Dice has no public API at all). Job data for Indeed/LinkedIn comes through JSearch; for all three, use <b>Portal links</b> on the Jobs tab to open the real site with your search pre-filled, or paste a posting link into <b>Import URL</b>.</div>
+      <div class="muted" style="margin-top:8px">Dice jobs come from Dice's own free connector. Indeed, LinkedIn, Glassdoor and ZipRecruiter jobs come through JSearch (needs the RapidAPI key). Any single posting can also be added with <b>Import URL</b>.</div>
       <div class="row" style="margin-top:10px"><button class="btn" id="s-portcheck">Check portal access</button>
         <span class="muted">Tests whether this server can reach each portal.</span></div>
       <div id="s-portres" style="margin-top:8px"></div>

@@ -560,7 +560,7 @@ def api_collect():
     return _do_collect()
 
 
-LIVE_SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow]  # dice: no public API
+LIVE_SOURCES = [adzuna, jsearch, dice, remoteok, remotive, arbeitnow]  # dice: official connector
 
 
 @app.post("/api/jobs/live-search")
@@ -579,6 +579,8 @@ def api_live_search(data: dict):
         enabled_sources = set(json.loads(settings.get("enabled_sources") or "[]"))
     except json.JSONDecodeError:
         enabled_sources = set(db.DEFAULT_ENABLED_SOURCES)
+    if dice.enabled(settings):
+        enabled_sources.add("dice")       # Dice's connector is free: on unless turned off
     query = {"title": title, "location": location}
     emp_wanted = emptype.parse_wanted(",".join(data.get("emp") or [])
                                       if isinstance(data.get("emp"), list)
@@ -809,7 +811,9 @@ def api_sources_status():
         configured = mod.enabled(settings)
         state = "disabled"
         if name == "dice":
-            state = "link-out only (no public API) — use Portal search links, Adzuna or URL import"
+            state = "ready (Dice official connector, free)" if configured else "disabled in settings"
+            if configured:
+                enabled_sources = set(enabled_sources) | {"dice"}
         elif name in enabled_sources:
             state = "ready" if configured else "needs credentials"
         out.append({

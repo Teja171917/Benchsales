@@ -27,12 +27,8 @@ PORTALS = [
      "note": "Salary context alongside postings."},
     {"id": "monster", "label": "Monster", "home": "https://www.monster.com/",
      "note": "Older board, still carries contract roles."},
-    {"id": "careerbuilder", "label": "CareerBuilder", "home": "https://www.careerbuilder.com/",
-     "note": "Staffing-heavy listings."},
     {"id": "ziprecruiter", "label": "ZipRecruiter", "home": "https://www.ziprecruiter.com/",
      "note": "Many staffing-agency postings."},
-    {"id": "lensa", "label": "Lensa", "home": "https://lensa.com/",
-     "note": "US job search with many staffing postings."},
 ]
 
 CONTRACT_TAGS = {"c2c", "w2", "contract", "1099", "c2h"}
