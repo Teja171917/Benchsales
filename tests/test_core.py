@@ -88,11 +88,13 @@ class PortalTests(unittest.TestCase):
         links = {l["id"]: l["url"] for l in
                  portals.build_links("Java Developer", "Houston, TX",
                                      ["fulltime", "c2c", "w2"], 7)}
-        for pid in ("dice", "indeed", "linkedin", "ziprecruiter", "glassdoor"):
+        for pid in ("dice", "indeed", "linkedin", "glassdoor", "monster", "careerbuilder",
+                    "ziprecruiter", "lensa"):
             self.assertIn(pid, links)
             self.assertTrue(links[pid].startswith("https://"))
         self.assertIn("Java+Developer", links["dice"])
-        self.assertIn("filters.employmentType=THIRD_PARTY", links["dice"])
+        self.assertIn("THIRD_PARTY", links["dice"])
+        self.assertEqual(links["dice"].count("filters.employmentType="), 1)
         self.assertIn("f_JT=F%2CC", links["linkedin"])
         self.assertIn("C2C", links["indeed"])
 
