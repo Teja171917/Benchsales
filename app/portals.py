@@ -54,6 +54,9 @@ def build_links(title: str, location: str = "", emp: list[str] | None = None,
     emp = emp or []
     q = quote_plus(title.strip())
     loc = quote_plus(location.strip())
+    # Blank location: say "United States" - otherwise the portal guesses from
+    # the visitor's IP address (e.g. Hyderabad, India).
+    us_loc = loc or "United+States"
     contract = bool(set(emp) & CONTRACT_TAGS)
     fulltime = "fulltime" in emp
 
@@ -71,7 +74,7 @@ def build_links(title: str, location: str = "", emp: list[str] | None = None,
 
     # Indeed: jt(fulltime) / jt(contract); fromage = days
     indeed_q = quote_plus(_kw(title.strip(), emp)) if contract else q
-    indeed = f"https://www.indeed.com/jobs?q={indeed_q}&l={loc}&fromage={days}"
+    indeed = f"https://www.indeed.com/jobs?q={indeed_q}&l={us_loc}&fromage={days}"
     if contract and not fulltime:
         indeed += "&sc=0kf%3Ajt%28contract%29%3B"
     elif fulltime and not contract:
@@ -88,24 +91,29 @@ def build_links(title: str, location: str = "", emp: list[str] | None = None,
     if li_types:
         li += "&f_JT=" + "%2C".join(li_types)
 
-    zip_ = (f"https://www.ziprecruiter.com/jobs-search?search={quote_plus(_kw(title.strip(), emp)) if contract else q}"
-            f"&location={loc}")
+    # ZipRecruiter, Glassdoor, Monster, Lensa, CareerBuilder don't understand
+    # "(C2C OR W2)" and return 0 jobs with it - plain title only.
+    zip_ = (f"https://www.ziprecruiter.com/jobs-search?search={q}"
+            f"&location={us_loc}")
 
-    glass = (f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={quote_plus(_kw(title.strip(), emp)) if contract else q}"
-             f"&locKeyword={loc}")
+    glass = (f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={q}"
+             f"&locKeyword={us_loc}")
 
-    monster = (f"https://www.monster.com/jobs/search?q={quote_plus(_kw(title.strip(), emp)) if contract else q}"
-               f"&where={loc}")
-    cb = (f"https://www.careerbuilder.com/jobs?keywords={quote_plus(_kw(title.strip(), emp)) if contract else q}"
-          f"&location={loc}")
+    monster = (f"https://www.monster.com/jobs/search?q={q}"
+               f"&where={us_loc}")
+    # CareerBuilder and Lensa ignore/reject search links: use a Google search
+    # limited to their site (reliable, and keeps the results in the USA).
+    def _site(domain):
+        return ("https://www.google.com/search?q=" + quote_plus(
+            f"site:{domain} {title.strip()} jobs {location.strip() or 'United States'}"))
+    cb = _site("careerbuilder.com")
     google = (f"https://www.google.com/search?q={quote_plus(_kw(title.strip(), emp))}"
               f"+jobs+{loc}&ibp=htl;jobs")
 
     urls = {"dice": dice, "indeed": indeed, "linkedin": li, "ziprecruiter": zip_,
             "glassdoor": glass, "monster": monster, "careerbuilder": cb,
             "google": google,
-            "lensa": (f"https://lensa.com/jobs?keywords={quote_plus(_kw(title.strip(), emp)) if contract else q}"
-                      f"&location={loc}")}
+            "lensa": _site("lensa.com")}
     return [{"id": p["id"], "label": p["label"], "url": urls[p["id"]],
              "note": p["note"]} for p in PORTALS]
 

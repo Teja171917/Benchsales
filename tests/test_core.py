@@ -98,6 +98,14 @@ class PortalTests(unittest.TestCase):
         self.assertIn("f_JT=F%2CC", links["linkedin"])
         self.assertIn("C2C", links["indeed"])
 
+    def test_blank_location_means_united_states(self):
+        links = {l["id"]: l["url"] for l in portals.build_links("qa", "", ["c2c"], 7)}
+        for pid in ("indeed", "linkedin", "ziprecruiter", "glassdoor", "monster"):
+            self.assertIn("United", links[pid], pid)
+        self.assertNotIn("C2C", links["ziprecruiter"])
+        self.assertIn("site%3Alensa.com", links["lensa"])
+        self.assertIn("United+States", links["lensa"])
+
 
 class DbTests(unittest.TestCase):
     def setUp(self):
