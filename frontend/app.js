@@ -987,7 +987,8 @@ async function renderSettings() {
       box.innerHTML = `
         <div><b>Searching now for:</b> ${qs.length ? qs.map((x) => `<span class="badge">${x}</span>`).join(" ") : '<span class="muted">nothing yet — upload a resume</span>'}</div>
         <div style="margin-top:6px"><b>Refresh every:</b> ${st.interval_minutes > 0 ? st.interval_minutes + " min" : "off"}${st.interval_wanted && st.interval_minutes > st.interval_wanted ? ` <span class="muted">(slowed down from ${st.interval_wanted} min to stay inside the Adzuna daily limit)</span>` : ""}
-          · <b>Adzuna calls today:</b> ${st.adzuna_used_today} / ${st.adzuna_daily_budget}</div>
+          · <b>Adzuna calls today:</b> ${st.adzuna_used_today} / ${st.adzuna_daily_budget}
+          · <b>JSearch (LinkedIn/Indeed) calls:</b> today ${st.jsearch_used_today ?? 0} / ${esc(st.jsearch_daily_budget || "6")}, this month ${st.jsearch_used_month ?? 0} / ${esc(st.jsearch_monthly_limit || "200")}</div>
         <div style="margin-top:6px"><b>Skills learned from resumes (${ls.length}):</b>
           ${ls.length ? ls.map((x) => `<span class="badge">${esc(x.skill)} <a href="#" data-unlearn="${esc(x.skill)}" title="Remove this skill">x</a></span>`).join(" ") : '<span class="muted">none yet</span>'}</div>`;
       $$("#s-auto [data-unlearn]").forEach((a) => a.onclick = async (e) => {

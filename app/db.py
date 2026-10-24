@@ -33,6 +33,10 @@ DEFAULT_SETTINGS = {
     "auto_learn_skills": "1",
     # Adzuna's default key allows 250 calls/day and 2,500/month; stay under it
     "adzuna_daily_budget": "80",
+    # JSearch free plan: 200 calls a month -> 6 a day for the automatic runs,
+    # and live searches stop at 195 so the month never goes over the limit
+    "jsearch_daily_budget": "6",
+    "jsearch_monthly_limit": "200",
     # Agent Office / Tailor: draft a tailored resume for matches at/above
     # this score (drafts only; a person confirms any added skill)
     "tailor_cutoff": "65",
@@ -411,6 +415,15 @@ def usage_today(source: str) -> int:
         r = conn.execute("SELECT hits FROM api_usage WHERE day=? AND source=?",
                          (day, source)).fetchone()
         return r["hits"] if r else 0
+
+
+def usage_month(source: str) -> int:
+    """Calls used this calendar month (UTC) - JSearch's free plan is 200 a month."""
+    month = now_iso()[:7]
+    with get_conn() as conn:
+        r = conn.execute("SELECT COALESCE(SUM(hits), 0) AS n FROM api_usage "
+                         "WHERE source=? AND substr(day, 1, 7)=?", (source, month)).fetchone()
+        return r["n"] if r else 0
 
 
 def usage_add(source: str, hits: int) -> None:

@@ -18,7 +18,9 @@ def fetch(query: dict, settings: dict) -> list[dict]:
     q = query.get("title", "")
     if query.get("location"):
         q += f" in {query['location']}"
-    params = {"query": q, "page": "1", "num_pages": "2",
+    # num_pages=1: JSearch counts extra pages as extra requests, and the free
+    # plan only has 200 a month
+    params = {"query": q, "page": "1", "num_pages": "1",
               "country": "us", "date_posted": "month"}
     # JSearch employment_types: FULLTIME, CONTRACTOR, PARTTIME, INTERN
     # (comma-separated = OR). C2C / W2 / 1099 / C2H roles are all CONTRACTOR.
@@ -31,9 +33,7 @@ def fetch(query: dict, settings: dict) -> list[dict]:
     if types:
         params["employment_types"] = ",".join(types)
     jobs: list[dict] = []
-    # One request: page=1 with num_pages=2 already covers pages 1-2. (The old
-    # loop also asked for page 2 with num_pages=2, re-fetching pages 2-3 and
-    # burning the small free-tier quota for duplicate results.)
+    # One request = one page (about 10 jobs) = one call of the monthly quota.
     r = get(BASE, params=params, headers=headers)
     r.raise_for_status()
     for j in r.json().get("data", []):

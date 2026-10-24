@@ -1243,6 +1243,26 @@ class LiveSearchRelevanceTests(unittest.TestCase):
         self.assertFalse(title_fits("Java Developer", "Python Developer"))
 
 
+class JSearchBudgetTests(unittest.TestCase):
+    def test_daily_and_monthly_limits(self):
+        import collector
+        tmp = tempfile.TemporaryDirectory()
+        old = db.DB_PATH
+        db.DB_PATH = Path(tmp.name) / "j.db"
+        try:
+            db.init_db()
+            s = db.get_settings()
+            self.assertEqual(collector.jsearch_room(s), (6, 195))
+            db.usage_add("jsearch", 4)
+            self.assertEqual(collector.jsearch_room(s)[0], 2)
+            db.usage_add("jsearch", 190)
+            self.assertEqual(collector.jsearch_room(s), (0, 1))
+            self.assertEqual(db.usage_month("jsearch"), 194)
+        finally:
+            db.DB_PATH = old
+            tmp.cleanup()
+
+
 class RoleFitTests(unittest.TestCase):
     def test_fits_role_rule(self):
         self.assertTrue(matcher.fits_role({"title": 20, "skill": 50}))

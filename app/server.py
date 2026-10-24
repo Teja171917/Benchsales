@@ -231,6 +231,10 @@ def api_collect_status():
         "queries": queries,
         "auto_queries": settings.get("auto_queries", "1") == "1",
         "adzuna_used_today": db.usage_today("adzuna"),
+        "jsearch_used_today": db.usage_today("jsearch"),
+        "jsearch_used_month": db.usage_month("jsearch"),
+        "jsearch_daily_budget": settings.get("jsearch_daily_budget") or "6",
+        "jsearch_monthly_limit": settings.get("jsearch_monthly_limit") or "200",
         "adzuna_daily_budget": autolearn.adzuna_budget(settings),
         "learned_skills": len(db.list_learned_skills()),
     }
@@ -607,6 +611,13 @@ def api_live_search(data: dict):
         if not mod.enabled(settings):
             sources[name] = {"label": label, "status": "needs API key — add it in Settings", "count": 0}
             continue
+        if name == "jsearch":
+            from collector import jsearch_room
+            if jsearch_room(settings)[1] <= 0:
+                sources[name] = {"label": label, "count": 0,
+                                 "status": "monthly free limit used up (resets next month)"}
+                continue
+            db.usage_add("jsearch", 1)
         try:
             fetched = mod.fetch(query, settings)
             if usa_only:

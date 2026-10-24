@@ -16,6 +16,18 @@ from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice
 SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice]
 
 
+def jsearch_room(settings: dict) -> tuple[int, int]:
+    """(calls left today for automatic runs, calls left this month)."""
+    def num(k, d):
+        try:
+            return max(0, int(float(settings.get(k) or d)))
+        except ValueError:
+            return d
+    month_left = max(0, num("jsearch_monthly_limit", 200) - 5 - db.usage_month("jsearch"))
+    today_left = max(0, num("jsearch_daily_budget", 6) - db.usage_today("jsearch"))
+    return min(today_left, month_left), month_left
+
+
 def _within_budget(queries: list, summary: dict) -> list:
     """Adzuna's free key allows 250 calls a day (2,500 a month). Use at most
     the daily budget setting, and start from a different query each time so
@@ -80,9 +92,18 @@ def run() -> dict:
                 run_queries = queries
                 if name == "adzuna":
                     run_queries = _within_budget(queries, summary)
+                if name == "jsearch":   # free plan: 200 calls a month
+                    room, _ = jsearch_room(settings)
+                    start = db.usage_month("jsearch") % max(1, len(queries))
+                    rotated = queries[start:] + queries[:start]   # every title gets turns
+                    run_queries = rotated[:room]
+                    if len(run_queries) < len(queries):
+                        summary["budget_skipped"]["jsearch"] = len(queries) - len(run_queries)
                 for q in run_queries:
                     if name == "adzuna":  # count before calling: a failed call can still use quota
                         db.usage_add("adzuna", autolearn.ADZUNA_CALLS_PER_QUERY)
+                    if name == "jsearch":
+                        db.usage_add("jsearch", 1)
                     batch = mod.fetch(q, settings)
                     if usa_only:
                         batch = usa.filter_us(batch)
