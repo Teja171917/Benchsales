@@ -96,8 +96,6 @@ def run() -> dict:
                 run_queries = queries
                 if name == "adzuna":
                     run_queries = _within_budget(queries, summary)
-                if name == "monster":
-                    db.set_setting("monster_last_run_at", datetime.now(timezone.utc).isoformat())
                 if name == "jsearch":   # free plan: 200 calls a month
                     room, _ = jsearch_room(settings)
                     start = db.usage_month("jsearch") % max(1, len(queries))
@@ -117,6 +115,8 @@ def run() -> dict:
                         fetched += 1
                         if db.insert_job(job):
                             new += 1
+                if name == "monster":   # only a run that WORKED starts the 12-hour wait
+                    db.set_setting("monster_last_run_at", datetime.now(timezone.utc).isoformat())
                 st.update(status="ok", jobs=fetched, new=new)
                 summary["jobs_fetched"] += fetched
                 summary["jobs_new"] += new
