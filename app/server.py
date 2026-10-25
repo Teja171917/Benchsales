@@ -635,7 +635,27 @@ def api_live_search(data: dict):
             jobs.extend(fetched)
             sources[name] = {"label": label, "status": "ok", "count": len(fetched)}
         except Exception as e:  # noqa: BLE001 - one bad source shouldn't kill the search
-            sources[name] = {"label": label, "status": f"error: {e}", "count": 0}
+            from app.sources.common import safe_error   # never show API keys on screen
+            sources[name] = {"label": label, "status": f"error: {safe_error(e)}", "count": 0}
+    # Monster is too slow to search live (1-2 minutes), so show the Monster jobs
+    # the automatic collection already saved (refreshed every 12 hours)
+    try:
+        saved = saved_jobs_for("monster", title, location)
+        if usa_only:
+            saved = usa.filter_us(saved)
+        for j in saved:
+            j["temp_id"] = f"monster:{j.get('source_id')}"
+            j["emp_tags"] = emptype.classify(j.get("employment_type", ""), j.get("title", ""),
+                                             j.get("description", ""))
+        if emp_wanted:
+            saved = [j for j in saved if emptype.matches_filter(
+                j["emp_tags"], emp_wanted, include_unspecified)]
+        saved = saved[:30]
+        jobs.extend(saved)
+        sources["monster"] = {"label": "Monster (saved, updated every 12 h)",
+                              "status": "ok", "count": len(saved)}
+    except Exception as e:  # noqa: BLE001
+        sources["monster"] = {"label": "Monster (saved)", "status": f"error: {e}", "count": 0}
     # rank: jobs whose title covers more of the query words come first
     words = title.lower().split()
 
@@ -649,6 +669,25 @@ def api_live_search(data: dict):
     jobs.sort(key=_relevance, reverse=True)
     jobs = mix_sources(jobs, _relevance)
     return {"jobs": jobs, "sources": sources}
+
+
+def saved_jobs_for(source: str, title: str, location: str = "") -> list:
+    """Jobs of one source already in the job board whose title fits the search."""
+    with db.get_conn() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM jobs WHERE source=? ORDER BY fetched_at DESC, id DESC LIMIT 2000",
+            (source,))]
+    loc = (location or "").strip().lower()
+    out = []
+    for r in rows:
+        if not title_fits(title, r.get("title", "")):
+            continue
+        if loc and loc not in {"remote", "usa", "us", "united states"} \
+                and loc not in (r.get("location") or "").lower():
+            continue
+        r.pop("emp_tags", None)
+        out.append(r)
+    return out
 
 
 def mix_sources(jobs: list, key) -> list:
