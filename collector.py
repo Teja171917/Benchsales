@@ -125,6 +125,8 @@ def run() -> dict:
                 st["status"] = f"error: {safe_error(e)}"
                 summary["errors"].append(f"{name}: {safe_error(e)}")
         summary["sources"][name] = st
+        if st["status"].startswith("waiting"):
+            continue   # keep the last REAL run visible in Settings (e.g. Monster's result)
         db.set_setting(f"last_run_{name}", json.dumps({
             "status": st["status"], "jobs": st["jobs"], "new": st["new"],
             "at": summary["started"],
