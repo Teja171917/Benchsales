@@ -83,7 +83,11 @@ def to_job(j: dict) -> dict:
         loc = loc.get("name") or loc.get("display_name") or ""
     publisher = clean(str(_g(j, "job_publisher", "publisher", "source") or "")).lower()
     # show WHERE the job was posted (LinkedIn, Indeed...) instead of "jsearch"
-    src = next((v for k, v in PUBLISHERS.items() if k in publisher.replace(" ", "")), NAME)
+    src = next((v for k, v in PUBLISHERS.items() if k in publisher.replace(" ", "")), "")
+    if not src and publisher:   # any other site (Jooble, USAJobs, Talent.com...): its own name
+        import re
+        src = re.sub(r"[^a-z0-9.]+", "", publisher)[:20]
+    src = src or NAME
     company = _g(j, "employer_name", "company_name", "company")
     if isinstance(company, dict):
         company = company.get("name") or ""

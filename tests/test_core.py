@@ -1282,7 +1282,9 @@ class JSearchAnswerTests(unittest.TestCase):
         self.assertEqual((j["source"], j["location"], j["company"]),
                          ("linkedin", "Austin, TX", "Acme"))
         self.assertEqual(jsearch.to_job({**self.ROW, "job_publisher": "Indeed"})["source"], "indeed")
-        self.assertEqual(jsearch.to_job({**self.ROW, "job_publisher": "Acme Careers"})["source"], "jsearch")
+        self.assertEqual(jsearch.to_job({**self.ROW, "job_publisher": "Jooble"})["source"], "jooble")
+        self.assertEqual(jsearch.to_job({**self.ROW, "job_publisher": "Talent.com"})["source"], "talent.com")
+        self.assertEqual(jsearch.to_job({**self.ROW, "job_publisher": ""})["source"], "jsearch")
 
 
 class MonsterTests(unittest.TestCase):
