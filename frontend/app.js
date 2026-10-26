@@ -77,11 +77,11 @@ function closeDrawer() {
 async function refreshBadges() {
   try {
     const [jobs, matches, apps, briefing] = await Promise.all([
-      api("/api/jobs?limit=500"), api("/api/matches?min_score=0"), api("/api/applications"),
+      api("/api/jobs/count"), api("/api/matches?min_score=0"), api("/api/applications"),
       api("/api/office/briefing").catch(() => null),
     ]);
     const set = (id, n) => { const b = $(id); if (b) b.textContent = n > 0 ? String(n) : ""; };
-    set("#nb-jobs", jobs.length);
+    set("#nb-jobs", jobs.count);
     set("#nb-matches", matches.length);
     set("#nb-queue", apps.filter((a) => !["rejected", "withdrawn"].includes(a.status)).length);
     if (briefing && briefing.agents) {
@@ -1091,7 +1091,7 @@ async function renderOverview() {
   $("#ov-collect").onclick = async () => { await runCollection(); renderOverview(); refreshBadges(); };
   try {
     const [cs, jobs, ms, apps, st] = await Promise.all([
-      api("/api/consultants"), api("/api/jobs?limit=500"),
+      api("/api/consultants"), api("/api/jobs/count"),
       api("/api/matches?min_score=0"), api("/api/applications"),
       api("/api/collect/status").catch(() => null),
     ]);
@@ -1100,7 +1100,7 @@ async function renderOverview() {
     const noResume = cs.filter((c) => !c.has_resume);
     $("#ov-stats").innerHTML = [
       ["Consultants", cs.length, "", "consultants"],
-      ["Jobs collected", jobs.length, "accent", "jobs"],
+      ["Jobs collected", jobs.count, "accent", "jobs"],
       ["Matches", ms.length, "accent", "matches"],
       ["Active applications", active, "", "queue"],
       ["Placed", placed, "good", "queue"],

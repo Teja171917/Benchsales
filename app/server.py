@@ -581,6 +581,12 @@ def api_collect():
 LIVE_SOURCES = [adzuna, jsearch, dice, remoteok, remotive, arbeitnow]  # dice: official connector
 
 
+@app.get("/api/jobs/count")
+def api_jobs_count():
+    """Total jobs in the job board (the list endpoints are capped for speed)."""
+    return {"count": db.count_jobs()}
+
+
 @app.post("/api/jobs/live-search")
 def api_live_search(data: dict):
     """Search the boards right now for a job title (+ optional location).
