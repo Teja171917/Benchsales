@@ -87,6 +87,9 @@ def is_us_job(job: dict) -> bool:
     loc = (job.get("location") or "").strip()
     if not loc:
         return True
+    m = re.search(r",\s*([A-Z]{2}),\s*(US|USA)\b", loc)
+    if m and m.group(1) not in US_STATES:
+        return False      # "Medellin, AN, US": a foreign region code, not a US state
     if has_us_marker(loc):
         return True
     if _NON_US.search(loc):

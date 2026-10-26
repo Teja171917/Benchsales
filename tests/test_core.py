@@ -1388,6 +1388,38 @@ class TargetRoleTests(unittest.TestCase):
             tmp.cleanup()
 
 
+class AgentFixTests(unittest.TestCase):
+    def test_foreign_region_with_us_suffix_is_not_usa(self):
+        from app import usa
+        self.assertFalse(usa.is_us_job({"location": "Medellin, AN, US"}))
+        self.assertTrue(usa.is_us_job({"location": "Dallas, TX, US"}))
+        self.assertTrue(usa.is_us_job({"location": "US"}))
+
+    def test_same_job_in_many_cities_is_one_match(self):
+        tmp = tempfile.TemporaryDirectory()
+        old = db.DB_PATH
+        db.DB_PATH = Path(tmp.name) / "dup.db"
+        try:
+            db.init_db()
+            c = db.create_consultant({"name": "Q", "target_roles": "QA Automation Engineer"})
+            db.upsert_resume(c["id"], "q.txt", "Q\nQA Automation Engineer\nselenium java playwright",
+                             ["selenium", "java", "playwright"])
+            for i, city in enumerate(["Boston, MA", "Phoenix, AZ", "Dallas, TX"]):
+                db.insert_job({"source": "adzuna", "source_id": str(i),
+                               "title": "Senior QA Automation Engineer - Playwright & Selenium",
+                               "company": "Cognizant", "location": city, "url": "u",
+                               "description": "selenium java playwright", "posted_at": ""})
+            matcher.run_all(threshold=0)
+            self.assertEqual(len(db.list_matches()), 1)
+        finally:
+            db.DB_PATH = old
+            tmp.cleanup()
+
+    def test_outreach_email_has_no_internal_score(self):
+        src = open(Path(__file__).resolve().parent.parent / "app" / "office.py").read()
+        self.assertNotIn("internal match score", src)
+
+
 class RoleFitTests(unittest.TestCase):
     def test_fits_role_rule(self):
         self.assertTrue(matcher.fits_role({"title": 20, "skill": 50}))

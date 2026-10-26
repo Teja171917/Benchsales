@@ -265,7 +265,14 @@ def queries_for_run(settings: dict) -> list:
         added = json.loads(settings.get("office_expanded_queries") or "[]")
     except json.JSONDecodeError:
         added = []
-    added = [q for q in added if isinstance(q, dict) and q.get("title")][-2:]
+    added = [q for q in added if isinstance(q, dict) and q.get("title")]
+    role_toks = set()
+    for c in db.consultants_with_resumes():
+        for t in matcher.titles_for(c):
+            role_toks |= matcher._title_tokens(t)
+    # keep only searches about the bench's kind of work (an old "Python
+    # Developer" expansion is dropped once the bench is SDETs)
+    added = [q for q in added if role_toks & matcher._title_tokens(q["title"])][-2:]
     auto = build_queries(db.consultants_with_resumes(), extra,
                          max(1, min(mx, 12) - len(added)))
     seen = {((q["title"]).lower(), (q.get("location") or "").lower()) for q in auto}

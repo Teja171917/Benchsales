@@ -284,6 +284,13 @@ def fits_role(breakdown: dict, strict: bool = False) -> bool:
     return (not strict) and breakdown.get("skill", 0) >= STRONG_SKILL
 
 
+def _same_job_key(job: dict | None) -> tuple:
+    if not job:
+        return ("", "")
+    t = re.sub(r"\(.*?\)|[^a-z0-9 ]", " ", (job.get("title") or "").lower())
+    return (" ".join(t.split()), (job.get("company") or "").strip().lower())
+
+
 def run_all(threshold: float | None = None,
             consultant_id: int | None = None) -> int:
     """Score every consultant with a resume against every job; insert new
@@ -304,10 +311,16 @@ def run_all(threshold: float | None = None,
         existing = {(r["consultant_id"], r["job_id"]) for r in conn.execute(
             'SELECT consultant_id, job_id FROM "matches"')}
     new = 0
+    jobs_by_id = {j["id"]: j for j in jobs}
+    seen_role = {(cid, _same_job_key(jobs_by_id.get(jid))) for cid, jid in existing
+                 if jid in jobs_by_id}
     for c in consultants:
         for j in jobs:
             if (c["id"], j["id"]) in existing:
                 continue
+            key = (c["id"], _same_job_key(j))
+            if key in seen_role:
+                continue      # same title at the same company, another city
             if not emp_compatible(c, emptype.from_db(j.get("emp_tags") or "")):
                 continue
             r = score(c, j)
@@ -315,6 +328,7 @@ def run_all(threshold: float | None = None,
                 if db.insert_match(c["id"], j["id"], r["score"],
                                    r["breakdown"], r["missing_skills"]):
                     new += 1
+                    seen_role.add(key)
     return new
 
 
@@ -356,11 +370,22 @@ def prune_misfits() -> int:
             'AND NOT EXISTS (SELECT 1 FROM tailored_resumes t WHERE t.match_id=m.id) '
             'AND NOT EXISTS (SELECT 1 FROM outreach_drafts o WHERE o.match_id=m.id)')]
     drop = []
+    best: dict = {}
     for m in rows:
         c, j = consultants.get(m["consultant_id"]), jobs.get(m["job_id"])
         if not c or not j:
             continue
-        if not fits_role(score(c, j)["breakdown"], has_role(c)):
+        r = score(c, j)
+        if not fits_role(r["breakdown"], has_role(c)):
+            drop.append(m["id"])
+            continue
+        key = (m["consultant_id"], _same_job_key(j))
+        prev = best.get(key)
+        if prev is None or r["score"] > prev[1]:
+            if prev is not None:
+                drop.append(prev[0])
+            best[key] = (m["id"], r["score"])
+        else:
             drop.append(m["id"])
     if drop:
         with db.get_conn() as conn:

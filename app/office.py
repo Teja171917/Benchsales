@@ -229,6 +229,22 @@ def _top_titles_for_skill(skill: str, since_iso: str, limit: int = 3) -> list[st
         return [r["title"] for r in rows if r["title"]]
 
 
+def _bench_roles() -> list:
+    """The consultants' own roles (target roles, else the role read from the
+    resume), shortest first - used to keep the Market Analyst's searches on
+    the bench's kind of work."""
+    roles = []
+    try:
+        for c in db.consultants_with_resumes():
+            for t in matcher.titles_for(c)[:2]:
+                t = t.strip()
+                if t and len(t.split()) <= 4 and t not in roles:
+                    roles.append(t)
+    except Exception:
+        return []
+    return sorted(roles, key=len)
+
+
 def _manual_queries(settings) -> list:
     try:
         qs = json.loads(settings.get("search_queries") or "[]")
@@ -299,12 +315,17 @@ def _market_analyst(settings):
         except (json.JSONDecodeError, TypeError):
             expanded = set()
         added = 0
+        roles = _bench_roles()
         for d in top_overall:
             if added >= MAX_QUERY_EXPANSIONS:
                 break
             if d["skill"] in bench_skills or d["skill"] in expanded:
                 continue  # bench already covers it, or already expanded before
-            for title in _top_titles_for_skill(d["skill"], since_iso):
+            if not roles:
+                continue   # no known role on the bench: a bare skill search brings unrelated jobs
+            # "Python" + the bench's own role -> "Python SDET" (not "Python Developer")
+            cands = [f"{display_name(d['skill'])} {roles[0]}"]
+            for title in cands:
                 if title.lower() not in existing:
                     queries = _expanded_queries()
                     queries.append({"title": title, "location": ""})
@@ -353,9 +374,6 @@ def _draft_outreach_body(full: dict) -> tuple[str, str]:
     ]
     if shown:
         lines.append(f"Why {first} fits — strong match on: " + ", ".join(shown) + ".")
-        lines.append("")
-    if score is not None:
-        lines.append(f"Our internal match score against your posting: {score}%.")
         lines.append("")
     try:
         c = db.get_consultant(full.get("consultant_id"))

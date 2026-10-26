@@ -1345,7 +1345,7 @@ async function renderOffice() {
     } catch (e) { toast("Restore failed: " + e.message, "err"); }
     renderOffice(); refreshBadges();
   });
-  $$("[data-draftm]", el).forEach((b) => b.onclick = () => { go("matches"); });
+  $$("[data-draftm]", el).forEach((b) => b.onclick = () => tailorModal(Number(b.dataset.draftm)));
 }
 
 /* ---------- router ---------- */
