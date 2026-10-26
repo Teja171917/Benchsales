@@ -202,14 +202,23 @@ def build_queries(consultants: list, manual: list, max_queries: int = 8) -> list
     max_queries = max(1, min(int(max_queries or 8), 12))  # 12 x 2 = 24 < Adzuna 25/min
     per: list[list[dict]] = []
     for c in consultants:
-        title = headline_title(c.get("raw_text") or "", c.get("skills") or [])
-        if not title:
+        typed = matcher.split_roles(c.get("target_roles") or "")
+        if typed:
+            titles = typed[:3]
+        else:
+            t = headline_title(c.get("raw_text") or "", c.get("skills") or [])
+            if not re.search(matcher.ROLE_WORDS, t or ""):
+                found = [x for x in matcher.titles_for(c) if len(x.split()) <= 6]
+                t = found[0] if found else t
+            titles = [t] if t else []
+        if not titles:
             continue
         qs = []
         loc = _loc_query(c.get("location"))
-        if loc:
-            qs.append({"title": title, "location": loc})
-        qs.append({"title": title, "location": "Remote"})
+        for title in titles:
+            if loc:
+                qs.append({"title": title, "location": loc})
+            qs.append({"title": title, "location": "Remote"})
         per.append(qs)
     out: list[dict] = []
     seen: set = set()

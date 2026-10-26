@@ -292,6 +292,14 @@ def api_update_consultant(cid: int, data: dict):
     if not c:
         raise HTTPException(404, "consultant not found")
     db.set_consultant_check(cid, False, "")   # a person edited it: no longer in doubt
+    if "target_roles" in data:      # new roles: re-score, drop unrelated, search again
+        try:
+            matcher_mod.rescore_existing(consultant_id=cid)
+            matcher_mod.prune_misfits()
+            matcher_mod.run_all(consultant_id=cid)
+            _kick_collect()
+        except Exception:
+            pass
     return db.get_consultant(cid)
 
 

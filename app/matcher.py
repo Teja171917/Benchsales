@@ -10,12 +10,55 @@ from .skills import extract_skills, requirements_skills
 
 STOPWORDS = {"a", "an", "the", "and", "or", "of", "for", "to", "in", "on",
              "at", "with", "sr", "senior", "junior", "jr", "ii", "iii", "iv",
-             "lead", "i", "software", "engineer", "developer"}
+             "lead", "i", "software", "engineer", "developer", "development",
+             "remote", "hybrid", "onsite", "position", "role", "full", "time",
+             "contract", "w2", "c2c", "usa", "only", "us"}
+# words that mean the same job family in a TITLE: an SDET, a QA engineer and a
+# test automation engineer are the same kind of job
+TITLE_SAME = {"sdet": "qa", "qa": "qa", "qe": "qa", "test": "qa", "tester": "qa",
+              "testing": "qa", "quality": "qa", "assurance": "qa",
+              "automated": "automation", "automate": "automation"}
+ROLE_WORDS = re.compile(r"engineer|developer|analyst|architect|tester|testing|test|"
+                        r"administrator|admin|consultant|manager|specialist|scientist|"
+                        r"lead|programmer|sdet|qa|qe|devops|sre|plm|teamcenter|designer",
+                        re.I)
 
 
 def _tokens(s: str) -> set[str]:
     toks = set(re.findall(r"[a-z0-9+#.\-]+", (s or "").lower()))
     return {t for t in toks if t not in STOPWORDS and len(t) > 1}
+
+
+def _title_tokens(s: str) -> set[str]:
+    """Title words with job-family synonyms merged (SDET = QA = Test)."""
+    low = (s or "").lower()
+    if "engineer in test" in low:
+        low += " qa"
+    toks = set(re.findall(r"[a-z0-9+#.]+", low.replace("-", " ").replace("/", " ")))
+    out = set()
+    for t in toks:
+        t = TITLE_SAME.get(t, t)
+        if t not in STOPWORDS and (len(t) > 1 or t in {"c"}):
+            out.add(t)
+    return out
+
+
+def split_roles(text: str) -> list:
+    """'SDET, QA Automation Engineer; Test Automation' -> 3 roles."""
+    return [r.strip() for r in re.split(r"[,;|\n]+", text or "") if r.strip()][:6]
+
+
+def role_from_filename(filename: str, name: str = "") -> str:
+    """'Leha_Software_Development_Engineer_in_Test_SDET.docx' ->
+    'Software Development Engineer in Test SDET' (the person's name removed)."""
+    base = re.sub(r"\.(docx?|pdf|txt|rtf)$", "", filename or "", flags=re.I)
+    base = re.sub(r"^[0-9a-f]{6,}-", "", base)          # upload prefix
+    words = [w for w in re.split(r"[_\-\s()]+", base) if w]
+    drop = {w.lower() for w in re.split(r"\s+", name or "") if w}
+    drop |= {"resume", "cv", "updated", "final", "new", "copy", "profile"}
+    words = [w for w in words if w.lower() not in drop and not w.isdigit()]
+    text = " ".join(words)
+    return text if ROLE_WORDS.search(text) and len(words) <= 9 else ""
 
 
 _LOC_NOISE = {"usa", "us", "united", "states", "america", "county"}
@@ -65,6 +108,10 @@ def role_from_summary(raw_text: str) -> str:
     "Results-driven Teamcenter PLM Professional with 8+ years..." ->
     "Teamcenter PLM". Returns "" when nothing sensible is found."""
     head = (raw_text or "")[:2500]
+    sp = re.search(r"speciali[sz]ation in ([A-Za-z /&+\-]{3,60}?)(?:[,.;]| with | in |$)",
+                   head, re.I | re.M)
+    if sp and ROLE_WORDS.search(sp.group(1)):
+        return sp.group(1).strip()
     m = _ROLE_RE.search(head)
     if not m:
         return ""
@@ -98,6 +145,32 @@ def consultant_title(raw_text: str) -> str:
         if re.match(r"(?i)(professional |career |executive )?(summary|profile|objective)", cand):
             return role_from_summary(raw_text) or cand
     return cand
+
+
+def titles_for(consultant: dict) -> list:
+    """The roles a consultant is matched (and searched) for. Target roles typed
+    on the consultant win; otherwise the resume's own title(s), the role in the
+    file name, and the role named in the summary. A 'title' that is really the
+    person's name is ignored."""
+    typed = split_roles(consultant.get("target_roles") or "")
+    if typed:
+        return typed
+    out = []
+    name = (consultant.get("name") or "").strip().lower()
+    for t in consultant_titles(consultant.get("raw_text") or ""):
+        if t and t.strip().lower() != name and ROLE_WORDS.search(t):
+            out.append(t)
+    fn = role_from_filename(consultant.get("filename") or "", consultant.get("name") or "")
+    if fn and fn not in out:
+        out.append(fn)
+    rs = role_from_summary(consultant.get("raw_text") or "")
+    if rs and rs not in out and ROLE_WORDS.search(rs):
+        out.append(rs)
+    return out
+
+
+def has_role(consultant: dict) -> bool:
+    return any(_title_tokens(t) for t in titles_for(consultant))
 
 
 def consultant_titles(raw_text: str) -> list:
@@ -159,9 +232,9 @@ def score(consultant: dict, job: dict) -> dict:
         skill_score *= min(1.0, len(jd_skills) / 3.0)
 
     # 20% title similarity
-    job_tokens = _tokens(job.get("title", ""))
-    title_score = max((_jaccard(_tokens(t), job_tokens)
-                       for t in consultant_titles(consultant.get("raw_text", ""))),
+    job_tokens = _title_tokens(job.get("title", ""))
+    title_score = max((_jaccard(_title_tokens(t), job_tokens)
+                       for t in titles_for(consultant)),
                       default=0.0)
 
     # 10% location/remote fit
@@ -200,13 +273,15 @@ def score(consultant: dict, job: dict) -> dict:
 STRONG_SKILL = 90.0   # a job whose title is unrelated needs a near-perfect skill fit
 
 
-def fits_role(breakdown: dict) -> bool:
+def fits_role(breakdown: dict, strict: bool = False) -> bool:
     """A job is shown to a consultant only when its title has something in
-    common with the person's own role(s), or the skills match almost
-    perfectly. Skill overlap alone is not enough: a Teamcenter administrator
-    and a test engineer both list Jira and SQL."""
-    return (breakdown.get("title", 0) > 0
-            or breakdown.get("skill", 0) >= STRONG_SKILL)
+    common with the person's own role(s). Skill overlap alone is not enough:
+    a Teamcenter administrator and a test engineer both list Jira and SQL, and
+    an SDET's resume lists DevOps tools too. Only when the person's role is
+    unknown (strict=False) does a near-perfect skill fit count instead."""
+    if breakdown.get("title", 0) > 0:
+        return True
+    return (not strict) and breakdown.get("skill", 0) >= STRONG_SKILL
 
 
 def run_all(threshold: float | None = None,
@@ -236,7 +311,7 @@ def run_all(threshold: float | None = None,
             if not emp_compatible(c, emptype.from_db(j.get("emp_tags") or "")):
                 continue
             r = score(c, j)
-            if r["score"] >= threshold and fits_role(r["breakdown"]):
+            if r["score"] >= threshold and fits_role(r["breakdown"], has_role(c)):
                 if db.insert_match(c["id"], j["id"], r["score"],
                                    r["breakdown"], r["missing_skills"]):
                     new += 1
@@ -285,7 +360,7 @@ def prune_misfits() -> int:
         c, j = consultants.get(m["consultant_id"]), jobs.get(m["job_id"])
         if not c or not j:
             continue
-        if not fits_role(score(c, j)["breakdown"]):
+        if not fits_role(score(c, j)["breakdown"], has_role(c)):
             drop.append(m["id"])
     if drop:
         with db.get_conn() as conn:

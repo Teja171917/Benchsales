@@ -1334,6 +1334,60 @@ class MonsterTests(unittest.TestCase):
             tmp.cleanup()
 
 
+class TargetRoleTests(unittest.TestCase):
+    TEXT = ("Jane D\n(555)123-4567\njane@x.com\nSummary\nAround 10 years of experience, "
+            "with specialization in Software Quality Assurance Testing, API testing.\n")
+    DESC = "selenium java jenkins docker aws playwright api testing"
+
+    def _c(self, **kw):
+        c = {"name": "Jane D", "raw_text": self.TEXT,
+             "filename": "Jane_Software_Development_Engineer_in_Test_SDET.docx",
+             "skills": ["selenium", "java", "jenkins", "docker", "aws", "playwright"]}
+        c.update(kw)
+        return c
+
+    def test_name_is_not_a_title_and_roles_are_found(self):
+        titles = matcher.titles_for(self._c())
+        self.assertNotIn("Jane D", titles)
+        self.assertIn("Software Development Engineer in Test SDET", titles)
+        self.assertTrue(matcher.has_role(self._c()))
+
+    def test_sdet_gets_qa_jobs_but_not_devops_or_java(self):
+        c = self._c()
+        def fits(title):
+            r = matcher.score(c, {"title": title, "description": self.DESC,
+                                  "location": "Remote", "remote_flag": True})
+            return matcher.fits_role(r["breakdown"], matcher.has_role(c))
+        for ok in ("QA Automation Engineer", "SDET", "Senior Test Automation Engineer",
+                   "Software Development Engineer in Test"):
+            self.assertTrue(fits(ok), ok)
+        for bad in ("Senior DevOps Engineer", "Lead Java Developer", "DEVOPS ENGINEER"):
+            self.assertFalse(fits(bad), bad)
+
+    def test_typed_target_roles_win_for_matching_and_searching(self):
+        c = self._c(target_roles="SDET, QA Automation Engineer")
+        self.assertEqual(matcher.titles_for(c), ["SDET", "QA Automation Engineer"])
+        qs = autolearn.build_queries([c], [], 8)
+        self.assertEqual([q["title"] for q in qs], ["SDET", "QA Automation Engineer"])
+
+    def test_unknown_role_still_allows_a_perfect_skill_fit(self):
+        self.assertTrue(matcher.fits_role({"title": 0, "skill": 95}, strict=False))
+        self.assertFalse(matcher.fits_role({"title": 0, "skill": 95}, strict=True))
+
+    def test_target_roles_saved_on_consultant(self):
+        tmp = tempfile.TemporaryDirectory()
+        old = db.DB_PATH
+        db.DB_PATH = Path(tmp.name) / "tr.db"
+        try:
+            db.init_db()
+            c = db.create_consultant({"name": "A", "target_roles": "SDET"})
+            self.assertEqual(c["target_roles"], "SDET")
+            self.assertEqual(db.update_consultant(c["id"], {"target_roles": "QA"})["target_roles"], "QA")
+        finally:
+            db.DB_PATH = old
+            tmp.cleanup()
+
+
 class RoleFitTests(unittest.TestCase):
     def test_fits_role_rule(self):
         self.assertTrue(matcher.fits_role({"title": 20, "skill": 50}))

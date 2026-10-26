@@ -223,6 +223,7 @@ async function renderConsultants() {
         <button class="btn" data-edit="${c.id}">Fix it</button></div></div>` : ""}
       <div class="muted">${esc(c.location)}${c.visa_status ? " · " + esc(c.visa_status) : ""}</div>
       ${c.email || c.phone ? `<div class="muted">${[c.email, c.phone].filter(Boolean).map(esc).join(" · ")}</div>` : ""}
+      ${c.target_roles ? `<div class="muted"><b>Target roles:</b> ${esc(c.target_roles)}</div>` : ""}
       <div style="margin:8px 0">
         ${c.has_resume
           ? `<span class="badge fname" title="${esc(c.resume_filename)}">resume: ${esc(c.resume_filename)}</span>
@@ -286,9 +287,11 @@ function consultantModal(c) {
       <label>Location</label><input type="text" id="m-location" value="${esc(c.location || "")}" placeholder="Houston, TX">
       <label>Visa status</label><input type="text" id="m-visa" value="${esc(c.visa_status || "")}" placeholder="H1B / GC / Citizen">
       <label>LinkedIn URL</label><input type="url" id="m-li" value="${esc(c.linkedin_url || "")}">
+      <label>Target roles</label><input type="text" id="m-roles" value="${esc(c.target_roles || "")}" placeholder="SDET, QA Automation Engineer, Test Automation Engineer">
       <label>Open to</label><div id="m-emp" class="chiprow">${empChips((c.emp_pref || "").split(",").filter(Boolean), "data-memp")}</div>
       <label>Notes</label><textarea id="m-notes" rows="2">${esc(c.notes || "")}</textarea>
     </div>
+    <div class="muted" style="margin-bottom:8px">Target roles: the jobs this person should get, separated by commas. BenchPilot searches for these roles and only matches jobs whose title fits one of them.</div>
     <div class="muted" style="margin-bottom:8px">Open to: leave all unchecked to match every engagement type. If you tick some, jobs that explicitly list only other types (e.g. "C2C only") are not matched to this consultant.</div>
     <div class="row"><button class="btn primary" id="m-save">Save</button>
     <button class="btn" id="m-cancel">Cancel</button></div>`);
@@ -298,7 +301,8 @@ function consultantModal(c) {
       phone: $("#m-phone").value, location: $("#m-location").value,
       visa_status: $("#m-visa").value, linkedin_url: $("#m-li").value,
       notes: $("#m-notes").value,
-      emp_pref: readEmp($("#m-emp"), "data-memp").join(",")};
+      emp_pref: readEmp($("#m-emp"), "data-memp").join(","),
+      target_roles: $("#m-roles").value.trim()};
     if (c.id) await api(`/api/consultants/${c.id}`, {method: "PUT", body: JSON.stringify(data)});
     else await api("/api/consultants", {method: "POST", body: JSON.stringify(data)});
     closeModal();

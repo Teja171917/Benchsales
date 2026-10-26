@@ -191,6 +191,8 @@ def init_db() -> None:
         if "needs_check" not in _columns(conn, "consultants"):
             conn.execute("ALTER TABLE consultants ADD COLUMN needs_check INTEGER DEFAULT 0")
             conn.execute("ALTER TABLE consultants ADD COLUMN check_notes TEXT DEFAULT ''")
+        if "target_roles" not in _columns(conn, "consultants"):
+            conn.execute("ALTER TABLE consultants ADD COLUMN target_roles TEXT DEFAULT ''")
         if "compliance_flag" not in _columns(conn, "matches"):
             conn.execute('ALTER TABLE "matches" ADD COLUMN compliance_flag INTEGER DEFAULT 0')
         # backfill employment tags for jobs saved before tagging existed
@@ -285,6 +287,10 @@ def create_consultant(data: dict) -> dict:
             ),
         )
         conn.commit()
+        if data.get("target_roles"):
+            conn.execute("UPDATE consultants SET target_roles=? WHERE id=?",
+                         (data["target_roles"], cur.lastrowid))
+            conn.commit()
         return get_consultant(cur.lastrowid)
 
 
@@ -306,7 +312,7 @@ def _clean_pref(v) -> str:
 
 def update_consultant(cid: int, data: dict) -> dict | None:
     fields = ["name", "email", "phone", "location", "visa_status",
-              "linkedin_url", "notes", "emp_pref"]
+              "linkedin_url", "notes", "emp_pref", "target_roles"]
     sets, vals = [], []
     for f in fields:
         if f in data:
