@@ -20,12 +20,12 @@ from app.relevance import title_fits
 from app import persist, resume_ai, resume_import
 from app import tailor as tailor_mod
 from app.skills import display_name, extract_skills
-from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster, urlimport
+from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster, urlimport, smartrecruiters
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster]
+SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster, smartrecruiters]
 
 app = FastAPI(title="BenchPilot", version="1.0")
 
@@ -622,13 +622,23 @@ def api_collect():
     return _do_collect()
 
 
-LIVE_SOURCES = [adzuna, jsearch, dice, remoteok, remotive, arbeitnow]  # dice: official connector
+LIVE_SOURCES = [adzuna, jsearch, dice, remoteok, remotive, arbeitnow, smartrecruiters]  # dice: official connector
 
 
 @app.get("/api/jobs/count")
 def api_jobs_count():
     """Total jobs in the job board (the list endpoints are capped for speed)."""
     return {"count": db.count_jobs()}
+
+
+@app.get("/api/firms")
+def api_firms():
+    """The staffing-firm watchlist (US tech recruiting companies): careers
+    URL + ATS per firm. Firms with a SmartRecruiters identifier are pulled
+    live by the staffing-firms source; the rest are directory entries
+    until their ATS adapter lands."""
+    return {"firms": smartrecruiters.firms(),
+            "live_count": len(smartrecruiters.sr_firms())}
 
 
 @app.post("/api/jobs/live-search")

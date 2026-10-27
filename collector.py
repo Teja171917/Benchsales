@@ -11,9 +11,11 @@ from datetime import datetime, timezone
 
 from app import autolearn, db, usa
 from app import matcher
-from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster
+from app.sources import (adzuna, jsearch, remoteok, remotive, arbeitnow,
+                         dice, monster, smartrecruiters)
 
-SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster]
+SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster,
+           smartrecruiters]
 
 
 def jsearch_room(settings: dict) -> tuple[int, int]:

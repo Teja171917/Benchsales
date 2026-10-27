@@ -1,0 +1,1618 @@
+[
+ {
+  "company": "Insight Global",
+  "careers_url": "https://careers.insightglobal.com",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Kforce",
+  "careers_url": "https://www.kforce.com/find-work",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Collabera",
+  "careers_url": "https://careers.smartrecruiters.com/Collabera6",
+  "ats": "SmartRecruiters",
+  "identifier": "Collabera6",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Akkodis",
+  "careers_url": "https://www.akkodis.com/en-us/careers/jobs/data-intelligence-sme-charlotte/us_en_6_971600_1570630",
+  "ats": "custom",
+  "identifier": "",
+  "verified": false,
+  "notes": "On-file URL is a single job posting; clean search root (akkodis.com/en-us/careers/jobs) timed out, unconfirmed; needs live-browser check"
+ },
+ {
+  "company": "TEKsystems",
+  "careers_url": "https://careers.teksystems.com/us/en",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Experis",
+  "careers_url": "https://www.experis.com/en/search",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Robert Half",
+  "careers_url": "https://www.roberthalf.com/us/en/find-jobs",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Aerotek",
+  "careers_url": "https://jobs.aerotek.com/us/en",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Randstad USA",
+  "careers_url": "https://www.randstadusa.com/jobs/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "The Judge Group",
+  "careers_url": "https://www.judge.com/jobs/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Signature Consultants",
+  "careers_url": "https://dexian.com/jobs/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Apex Systems",
+  "careers_url": "https://www.apexsystems.com/search-results-crp",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": "Clean search root; params stripped"
+ },
+ {
+  "company": "CyberCoders",
+  "careers_url": "https://jobs.cybercoders.com/search/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Aston Carter",
+  "careers_url": "https://careers.astoncarter.com",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Beacon Hill Staffing",
+  "careers_url": "https://jobs.beaconhillstaffing.com/jobs/job-search/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Infojini",
+  "careers_url": "https://careers.smartrecruiters.com/InfojiniInc1",
+  "ats": "SmartRecruiters",
+  "identifier": "InfojiniInc1",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Allegis Group",
+  "careers_url": "https://www.allegisgroup.com/careers",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Motion Recruitment",
+  "careers_url": "https://motionrecruitment.com/about/work-for-us/careers",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": "Renders live candidate job search (93 jobs) despite work-for-us path; no separate candidate path (motionrecruitment.com/jobs = 404)"
+ },
+ {
+  "company": "Creative Circle",
+  "careers_url": "https://candidateportal.creativecircle.com/search/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Adecco",
+  "careers_url": "https://adecco.com/en-us/job-search",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Kelly Services",
+  "careers_url": "https://kellyservices.wd503.myworkdayjobs.com/corporatecareers-kellyservices-com",
+  "ats": "Workday",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Mastech Digital",
+  "careers_url": "https://jobs.mastechdigital.com/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Cognizant",
+  "careers_url": "https://careers.cognizant.com/us-en/jobs/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Yoh",
+  "careers_url": "https://jobs.yoh.com/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Hays",
+  "careers_url": "https://www.hays.com/job-search",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Infosys",
+  "careers_url": "https://digitalcareers.infosys.com/infosys/global-careers",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Tata Consultancy Services",
+  "careers_url": "https://www.tcs.com/careers",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Global Employment Solutions",
+  "careers_url": "https://www.gesimn.com/category/job-openings/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Volt Information Sciences",
+  "careers_url": "https://jobs.volt.com/browse-jobs",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Staffmark",
+  "careers_url": "https://staffmark.com/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": false,
+  "notes": "No searchable job portal found; homepage only"
+ },
+ {
+  "company": "Spherion",
+  "careers_url": "https://careers.smartrecruiters.com/SpherionStaffing",
+  "ats": "SmartRecruiters",
+  "identifier": "SpherionStaffing",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Hexaware",
+  "careers_url": "https://hexaware.com/careers/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Capgemini",
+  "careers_url": "https://www.capgemini.com/careers/join-capgemini/job-search/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Mindlance",
+  "careers_url": "https://careers.smartrecruiters.com/Mindlance2",
+  "ats": "SmartRecruiters",
+  "identifier": "Mindlance2",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Mphasis",
+  "careers_url": "https://www2.mphasis.com/hot-jobs.html",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Persistent Systems",
+  "careers_url": "https://careers.persistent.com/explore-opportunities",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Virtusa",
+  "careers_url": "https://www.virtusa.com/careers/job-search/global/en",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Genpact",
+  "careers_url": "https://genpact.wd108.myworkdayjobs.com/External_Careers",
+  "ats": "Workday",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Coforge",
+  "careers_url": "https://careers.coforge.com/coforge/",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "CGI",
+  "careers_url": "https://cgi.njoyn.com/CORP/xweb/xweb.asp?page=JobListing&CLID=21001&lang=1",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Direct job list linked from cgi.com/en/careers; replaces cgi.jobs front-end"
+ },
+ {
+  "company": "Unisys",
+  "careers_url": "https://jobs.unisys.com/us/en",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Fujitsu",
+  "careers_url": "https://jobs.global.fujitsu.com/",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "NTT DATA",
+  "careers_url": "https://careers.nttdata.com/",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Wipro",
+  "careers_url": "https://careers.wipro.com",
+  "ats": "SuccessFactors",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Sutherland Global",
+  "careers_url": "https://jobs.sutherlandglobal.com",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "HCLTech",
+  "careers_url": "https://careers.hcltech.com",
+  "ats": "SuccessFactors",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Sopra Steria",
+  "careers_url": "https://careers.soprasteria.com/Jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Cyient",
+  "careers_url": "https://careers.cyient.com/cyient/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "EPAM Systems",
+  "careers_url": "https://careers.epam.com/en/jobs",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": "Global jobs root; replaces Romania-specific page"
+ },
+ {
+  "company": "Globant",
+  "careers_url": "https://careers.smartrecruiters.com/Globant2",
+  "ats": "SmartRecruiters",
+  "identifier": "Globant2",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Thoughtworks",
+  "careers_url": "https://www.thoughtworks.com/careers/jobs",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Conduent",
+  "careers_url": "https://careers.conduent.com/us/en/search-results",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Perficient",
+  "careers_url": "https://careers.smartrecruiters.com/Perficient2",
+  "ats": "SmartRecruiters",
+  "identifier": "Perficient2",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Slalom",
+  "careers_url": "https://jobs.slalom.com",
+  "ats": "Avature",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Tech Mahindra",
+  "careers_url": "https://careers.techmahindra.com",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Accenture",
+  "careers_url": "https://www.accenture.com/us-en/careers/jobsearch",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Deloitte",
+  "careers_url": "https://apply.deloitte.com/en_US/careers/SearchJobs",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Atos",
+  "careers_url": "https://jobs.atos.net/viewalljobs/",
+  "ats": "SuccessFactors",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "PwC",
+  "careers_url": "https://jobs-us.pwc.com/us/en",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "KPMG",
+  "careers_url": "https://www.kpmguscareers.com/job-search/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "EY",
+  "careers_url": "https://careers.ey.com",
+  "ats": "SuccessFactors",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Avanade",
+  "careers_url": "https://www.avanade.com/en/career",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "LTIMindtree",
+  "careers_url": "https://careers.ltimindtree.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Nagarro",
+  "careers_url": "https://careers.smartrecruiters.com/nagarro1",
+  "ats": "SmartRecruiters",
+  "identifier": "nagarro1",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Mastek",
+  "careers_url": "https://careers.mastek.com/search/",
+  "ats": "SuccessFactors",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "IBM Consulting",
+  "careers_url": "https://www.ibm.com/careers/consulting",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Hitachi Solutions",
+  "careers_url": "https://global.hitachi-solutions.com/about/careers/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Xoriant",
+  "careers_url": "https://careers.smartrecruiters.com/Xoriant1",
+  "ats": "SmartRecruiters",
+  "identifier": "Xoriant1",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Zensar",
+  "careers_url": "https://www.zensar.com/careers",
+  "ats": "Oracle Cloud HCM",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "SHI International",
+  "careers_url": "https://www.shi.com/careers",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Sonata Software",
+  "careers_url": "https://sonataone.darwinbox.in/ms/candidate/careers",
+  "ats": "Darwinbox",
+  "identifier": "",
+  "verified": true,
+  "notes": "Darwinbox is the only candidate portal; listings JS-rendered, not confirmed in text fetch"
+ },
+ {
+  "company": "Datamatics",
+  "careers_url": "https://careers.smartrecruiters.com/datamaticsglobalservicesinc",
+  "ats": "SmartRecruiters",
+  "identifier": "datamaticsglobalservicesinc",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Insight Enterprises",
+  "careers_url": "https://careers.insight.com/careers",
+  "ats": "Eightfold",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Sogeti",
+  "careers_url": "https://careers.smartrecruiters.com/Sogeti",
+  "ats": "SmartRecruiters",
+  "identifier": "Sogeti",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Ness Digital Engineering",
+  "careers_url": "https://jobs.jobvite.com/ness/jobs",
+  "ats": "Jobvite",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "CACI",
+  "careers_url": "https://careers.caci.com/",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Birlasoft",
+  "careers_url": "https://jobs.birlasoft.com",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Presidio",
+  "careers_url": "https://www.presidio.com/careers",
+  "ats": "UKG",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "ManTech",
+  "careers_url": "https://careers.mantech.com/en_US/careers/SearchJobs",
+  "ats": "BrassRing",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Peraton",
+  "careers_url": "https://careers.peraton.com/search-jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "General Dynamics IT",
+  "careers_url": "https://www.gdit.com/careers/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "SAIC",
+  "careers_url": "https://jobs.saic.com/",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "ICF",
+  "careers_url": "https://careers.icf.com/us/en/search-results?keywords",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "KBR",
+  "careers_url": "https://kbr.wd5.myworkdayjobs.com/KBR_Careers",
+  "ats": "Workday",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Maximus",
+  "careers_url": "https://maximus.avature.net/careers/SearchJobs/",
+  "ats": "Avature",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "BAE Systems",
+  "careers_url": "https://jobs.baesystems.com/global/en/search-results",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Parsons",
+  "careers_url": "https://jobs.parsons.com/job-search-results",
+  "ats": "Eightfold",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Softchoice",
+  "careers_url": "https://careers.softchoice.com/search/",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "L3Harris",
+  "careers_url": "https://careers.l3harris.com/en/search-jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Tyto Athene",
+  "careers_url": "https://careers-gotyto.icims.com",
+  "ats": "iCIMS",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Amentum",
+  "careers_url": "https://www.amentumcareers.com/jobs/search",
+  "ats": "custom",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Guidehouse",
+  "careers_url": "https://guidehouse.wd1.myworkdayjobs.com/External",
+  "ats": "Workday",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "V2X",
+  "careers_url": "https://careers.gov2x.com/why-gov2x/jobs",
+  "ats": "iCIMS",
+  "identifier": "",
+  "verified": false,
+  "notes": "careers.gov2x.com 403 bot-blocked, unverified; note: v2x.com is an unrelated EV site, not this company; needs live-browser check"
+ },
+ {
+  "company": "RTX",
+  "careers_url": "https://careers.rtx.com/global/en/search-results",
+  "ats": "Phenom",
+  "identifier": "",
+  "verified": false,
+  "notes": ""
+ },
+ {
+  "company": "Telos",
+  "careers_url": "https://telos.hua.hrsmart.com/hr/ats/JobSearch/viewAll",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Sev1Tech",
+  "careers_url": "https://careers-sev1tech.icims.com",
+  "ats": "iCIMS",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Actalent",
+  "careers_url": "https://careers-actalentservices.icims.com/jobs",
+  "ats": "icims",
+  "identifier": "",
+  "verified": true,
+  "notes": "iCIMS Careers Center; listings JS-rendered"
+ },
+ {
+  "company": "Ettain Group",
+  "careers_url": "https://jobs.smartrecruiters.com/EttainGroup",
+  "ats": "smartrecruiters",
+  "identifier": "EttainGroup",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Oxford Global Resources",
+  "careers_url": "https://jobs.oxfordcorp.com",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Addison Group",
+  "careers_url": "https://addisongroup.com/find-a-job/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Candidate marketing page only; no job listings confirmed"
+ },
+ {
+  "company": "Vaco",
+  "careers_url": "https://www.vaco.com/careers",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Careers hub only; no job-search root confirmed"
+ },
+ {
+  "company": "Eliassen Group",
+  "careers_url": "https://careers.eliassen.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Swoon",
+  "careers_url": "https://www.swoonstaffing.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Page shows internal error instead of listings"
+ },
+ {
+  "company": "Mondo",
+  "careers_url": "https://mondo.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings JS-rendered"
+ },
+ {
+  "company": "Kyyba",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No Kyyba-owned job portal found"
+ },
+ {
+  "company": "Brooksource",
+  "careers_url": "https://jobs.brooksource.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Ampcus",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No job portal found; only third-party postings"
+ },
+ {
+  "company": "eTeam Inc",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No job portal root found"
+ },
+ {
+  "company": "Artech",
+  "careers_url": "https://www.artech.com/careers/consultant-jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Pinnacle Group",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Verification rate-limited (429); portal not confirmed"
+ },
+ {
+  "company": "Digital Prospectors",
+  "careers_url": "https://digitalprospectors.com/find-work/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Ledgent Technology",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Roth Staffing business line; no Ledgent-owned portal found"
+ },
+ {
+  "company": "Infinity Consulting Solutions",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Acquired by Korn Ferry 2022; no separate portal"
+ },
+ {
+  "company": "Harvey Nash USA",
+  "careers_url": "https://www.HarveyNashUSA.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings likely JS/filtered"
+ },
+ {
+  "company": "Workbridge Associates",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Motion Recruitment brand; no separate branded portal"
+ },
+ {
+  "company": "Jobspring Partners",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Motion Recruitment brand; no separate branded portal"
+ },
+ {
+  "company": "Aquent",
+  "careers_url": "https://aquent.com/find-work",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings JS-rendered"
+ },
+ {
+  "company": "24 Seven",
+  "careers_url": "https://jobs.smartrecruiters.com/24SevenInc",
+  "ats": "smartrecruiters",
+  "identifier": "24SevenInc",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Planet Interactive",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No job-search root found"
+ },
+ {
+  "company": "Onward Search",
+  "careers_url": "https://www.onwardsearch.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Manpower",
+  "careers_url": "https://www.manpower.com/en/search",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Distinct from Experis"
+ },
+ {
+  "company": "Nigel Frank International",
+  "careers_url": "https://www.nigelfrank.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "HTTP 403 bot-block; candidate URL not confirmed"
+ },
+ {
+  "company": "Mason Frank International",
+  "careers_url": "https://www.masonfrank.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "HTTP 403 bot-block; candidate URL not confirmed"
+ },
+ {
+  "company": "Jefferson Frank",
+  "careers_url": "https://www.jeffersonfrank.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "HTTP 403 bot-block; candidate URL not confirmed"
+ },
+ {
+  "company": "Anderson Frank",
+  "careers_url": "https://www.andersonfrank.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "HTTP 403 bot-block; candidate URL not confirmed"
+ },
+ {
+  "company": "Washington Frank",
+  "careers_url": "https://www.washingtonfrank.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "HTTP 403 bot-block; candidate URL not confirmed"
+ },
+ {
+  "company": "Pyramid Consulting",
+  "careers_url": "https://pyramidci.jobs.net/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Portal root not confirmed; only single-job pages found"
+ },
+ {
+  "company": "VDart Inc",
+  "careers_url": "https://jobs.smartrecruiters.com/VDartInc21",
+  "ats": "smartrecruiters",
+  "identifier": "VDartInc21",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Intelliswift Software",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Only single job pages found; no portal root"
+ },
+ {
+  "company": "Rang Technologies",
+  "careers_url": "https://rangtech.com/company/careers/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Careers page is resume-submission landing only; no job-search page exists on rangtech.com; jobs only on third-party boards"
+ },
+ {
+  "company": "V-Soft Consulting",
+  "careers_url": "https://www.vsoftconsulting.com/careers/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Marketing landing page only, no rendered job list; no separate job-search page found; postings surface on Dice"
+ },
+ {
+  "company": "Compunnel",
+  "careers_url": "https://staffline.compunnel.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Portal root returned 403"
+ },
+ {
+  "company": "Cynet Systems",
+  "careers_url": "https://www.cynetsystems.com/find-work/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Find-work page is a perks landing page, no job list; no job board on cynetsystems.com; jobs only via CareerBuilder/Dice"
+ },
+ {
+  "company": "Trigyn Technologies",
+  "careers_url": "https://jobs.smartrecruiters.com/TrigynTechnologies1",
+  "ats": "smartrecruiters",
+  "identifier": "TrigynTechnologies1",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "ACS Group",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Homepage bot-check; no portal found"
+ },
+ {
+  "company": "IDC Technologies",
+  "careers_url": "https://jobs.smartrecruiters.com/IDCTechnologies",
+  "ats": "smartrecruiters",
+  "identifier": "IDCTechnologies",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Tekshapers",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No portal found; only third-party listings"
+ },
+ {
+  "company": "TalentBurst",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No public portal confirmed; ATS is JobDiva per case study"
+ },
+ {
+  "company": "Net2Source",
+  "careers_url": "https://www.net2source.com/careers",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Job list JS-driven"
+ },
+ {
+  "company": "Diverse Lynx",
+  "careers_url": "https://www2.jobdiva.com/candidates/myjobs/searchjobsdone.jsp?a=9xjdnw687b7a7nvvdyut936kpjlgy0023blrozaecads0pdnwppcswnaaku8ji2g",
+  "ats": "jobdiva",
+  "identifier": "",
+  "verified": true,
+  "notes": "Direct candidate portal linked from diverselynx.com/careers; listings JS-rendered"
+ },
+ {
+  "company": "CAI",
+  "careers_url": "https://careers.cai.io/us/en",
+  "ats": "phenom",
+  "identifier": "",
+  "verified": true,
+  "notes": "Phenom portal; job list JS-driven"
+ },
+ {
+  "company": "ApTask",
+  "careers_url": "https://jobs.smartrecruiters.com/ApTask2",
+  "ats": "smartrecruiters",
+  "identifier": "ApTask2",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Matlen Silver",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Homepage bot-check; no portal found"
+ },
+ {
+  "company": "Softworld Inc",
+  "careers_url": "https://jobs.softworldinc.com",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Direct job search linked from softworldinc.com homepage; replaces Lever board"
+ },
+ {
+  "company": "ATR International",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No portal found; only third-party listings"
+ },
+ {
+  "company": "Eclaro",
+  "careers_url": "https://careers-eclaro.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Mitchell Martin Inc",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No portal URL found; only single job pages"
+ },
+ {
+  "company": "Synergis",
+  "careers_url": "https://www.synergishr.com/jobs/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Genuent",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No public portal found"
+ },
+ {
+  "company": "Veredus",
+  "careers_url": "https://jobs.smartrecruiters.com/VeredusDC",
+  "ats": "smartrecruiters",
+  "identifier": "VeredusDC",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Sparks Group",
+  "careers_url": "https://jobs.sparksgroupinc.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings JS-driven"
+ },
+ {
+  "company": "Procom",
+  "careers_url": "https://myprocom-portal.procomservices.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "PTR Global",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No portal found"
+ },
+ {
+  "company": "ALKU",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No jobs portal found"
+ },
+ {
+  "company": "Lorien",
+  "careers_url": "https://www.lorienglobal.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Direct job-search page on official domain; replaces job-seekers hub"
+ },
+ {
+  "company": "Huxley",
+  "careers_url": "https://www.huxley.com/en-us/job-search/all-jobs/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "SThree shared platform"
+ },
+ {
+  "company": "Computer Futures",
+  "careers_url": "https://www.computerfutures.com/en-us/job-search/all-jobs/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "SThree shared platform"
+ },
+ {
+  "company": "Michael Page Technology",
+  "careers_url": "https://www.michaelpage.com/jobs/information-technology",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Michael Page US IT jobs portal"
+ },
+ {
+  "company": "Robert Walters",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Jobs page 403; technology page marketing only"
+ },
+ {
+  "company": "System One",
+  "careers_url": "https://jobs.systemone.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings JS-rendered"
+ },
+ {
+  "company": "TekPartners",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Rebranded as INSPYR Solutions; no clean portal root confirmed"
+ },
+ {
+  "company": "Open Systems Technologies",
+  "careers_url": "https://www.opensystemstech.com/search",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "The Panther Group",
+  "careers_url": "https://jobs.thepanthergrp.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings JS-rendered"
+ },
+ {
+  "company": "K2 Partnering Solutions",
+  "careers_url": "https://jobs.smartrecruiters.com/K2PartneringSolutions2",
+  "ats": "smartrecruiters",
+  "identifier": "K2PartneringSolutions2",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "iTech Solutions",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Pages load but show no job listings"
+ },
+ {
+  "company": "Eastridge Workforce Solutions",
+  "careers_url": "https://jobs.eastridge.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings JS-rendered"
+ },
+ {
+  "company": "GEE Group",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Careers page is internal corporate careers only"
+ },
+ {
+  "company": "IDR Inc",
+  "careers_url": "https://jobs.idr-inc.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Inceed",
+  "careers_url": "https://jobs.inceed.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Conexess Group",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Bot-check page; jobs subdomain unresolvable"
+ },
+ {
+  "company": "The Fountain Group",
+  "careers_url": "https://www.thefountaingroup.com/search",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings JS-rendered"
+ },
+ {
+  "company": "Entegee",
+  "careers_url": "https://entegee.com/engineering-jobs/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings JS-rendered"
+ },
+ {
+  "company": "Talascend",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No listings or job-search link found"
+ },
+ {
+  "company": "Belcan",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Careers page bot-check; no portal confirmed"
+ },
+ {
+  "company": "CDI Corporation",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No portal found"
+ },
+ {
+  "company": "Salt",
+  "careers_url": "https://welovesalt.com/jobs/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Global portal with USA roles"
+ },
+ {
+  "company": "Real Staffing",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No extractable job-search link; job-search URLs 404"
+ },
+ {
+  "company": "Progressive Recruitment",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "SThree Progressive; no job-search link found"
+ },
+ {
+  "company": "Glocomms",
+  "careers_url": "https://www.glocomms.com/en-us/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "132 results loaded"
+ },
+ {
+  "company": "RCM Technologies",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Careers page is corporate only; no job links"
+ },
+ {
+  "company": "US Tech Solutions",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "No job-search link found"
+ },
+ {
+  "company": "PDS Tech",
+  "careers_url": "https://www.pdstech.com/job-search",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "281 jobs found"
+ },
+ {
+  "company": "Chipton-Ross",
+  "careers_url": "https://www.chiptonross.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "495 jobs shown"
+ },
+ {
+  "company": "Butler America",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Careers/jobs pages 404; no job-list link"
+ },
+ {
+  "company": "CTG",
+  "careers_url": "https://jobs.ctg.com",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Candidate portal loads but list JS-only, not confirmed"
+ },
+ {
+  "company": "EdgeLink",
+  "careers_url": "https://www.talentgroups.com/jobs/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "EdgeLink unified into Talent Groups"
+ },
+ {
+  "company": "The Squires Group",
+  "careers_url": "https://jobs.squiresgroup.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Mindbank Consulting Group",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Careers landing only; no job list"
+ },
+ {
+  "company": "HireStrategy",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Brand retired into Addison Group 2020"
+ },
+ {
+  "company": "Tandym Group",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Job-search page returned 502"
+ },
+ {
+  "company": "The Select Group",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Portal renders single posting only; not a confirmed list"
+ },
+ {
+  "company": "Kavaliro",
+  "careers_url": "https://jobs.smartrecruiters.com/Kavaliro2",
+  "ats": "smartrecruiters",
+  "identifier": "Kavaliro2",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "CPS Recruitment",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Rebranded as Sapphire Recruitment 2025"
+ },
+ {
+  "company": "SNI Technology",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Landing only; jobs subdomain failed DNS"
+ },
+ {
+  "company": "Talent International",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Jobs pages 404; no standalone US portal"
+ },
+ {
+  "company": "Nesco Resource",
+  "careers_url": "https://www.nescoresource.com/job-search/",
+  "ats": "shazamme",
+  "identifier": "",
+  "verified": true,
+  "notes": "Listings JS-rendered"
+ },
+ {
+  "company": "Medix",
+  "careers_url": "https://jobs.medixteam.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "Healthcare, life sciences and technology roles"
+ },
+ {
+  "company": "TechUSA",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Redirects to System One; no standalone portal"
+ },
+ {
+  "company": "Russell Tobin",
+  "careers_url": "https://www.russelltobin.com/jobs/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": ""
+ },
+ {
+  "company": "Wimmer Solutions",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Careers landing only; jobs pages 404/unresolvable"
+ },
+ {
+  "company": "Redfish Technology",
+  "careers_url": "https://www.redfishtech.com/job/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "116 results; /jobs 404, working archive is /job/"
+ },
+ {
+  "company": "HireBetter",
+  "careers_url": "",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": false,
+  "notes": "Now 512Financial executive search; no public job board"
+ }
+]
