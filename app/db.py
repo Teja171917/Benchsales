@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import emptype
+from . import rules as rules_mod
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("BENCHPILOT_DB", BASE_DIR / "data" / "benchpilot.db"))
@@ -41,8 +42,12 @@ DEFAULT_SETTINGS = {
     "jsearch_daily_budget": "6",
     "jsearch_monthly_limit": "200",
     # Agent Office / Tailor: draft a tailored resume for matches at/above
-    # this score (drafts only; a person confirms any added skill)
+    # this score (a person confirms any added skill). With
+    # auto_queue_tailored on, each draft is also filed into the apply
+    # queue with the tailored resume attached - queueing is a worklist,
+    # not a submission; a person still applies.
     "tailor_cutoff": "65",
+    "auto_queue_tailored": "1",
     # resume folder import (Google Drive): see app/resume_import.py
     "resume_folder_url": "",
     "google_api_key": "",
@@ -70,6 +75,7 @@ CREATE TABLE IF NOT EXISTS consultants (
     linkedin_url TEXT DEFAULT '',
     notes TEXT DEFAULT '',
     emp_pref TEXT DEFAULT '',
+    rules_json TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS resumes (
@@ -288,6 +294,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE consultants ADD COLUMN check_notes TEXT DEFAULT ''")
         if "target_roles" not in _columns(conn, "consultants"):
             conn.execute("ALTER TABLE consultants ADD COLUMN target_roles TEXT DEFAULT ''")
+        if "rules_json" not in _columns(conn, "consultants"):
+            conn.execute("ALTER TABLE consultants ADD COLUMN rules_json TEXT DEFAULT ''")
         if "compliance_flag" not in _columns(conn, "matches"):
             conn.execute('ALTER TABLE "matches" ADD COLUMN compliance_flag INTEGER DEFAULT 0')
         # backfill employment tags for jobs saved before tagging existed
@@ -378,24 +386,33 @@ def set_setting(key: str, value: str) -> None:
 
 
 # ---- consultants ----
+def _with_rules(d: dict) -> dict:
+    """Attach the parsed standing rules to a consultant row dict."""
+    d["rules"] = rules_mod.parse_rules(d.get("rules_json"))
+    return d
+
+
 def list_consultants() -> list:
     with get_conn() as conn:
-        return [dict(r) for r in conn.execute(
+        return [_with_rules(dict(r)) for r in conn.execute(
             "SELECT * FROM consultants ORDER BY id")]
 
 
 def get_consultant(cid: int) -> dict | None:
     with get_conn() as conn:
         r = conn.execute("SELECT * FROM consultants WHERE id=?", (cid,)).fetchone()
-        return dict(r) if r else None
+        return _with_rules(dict(r)) if r else None
 
 
 def create_consultant(data: dict) -> dict:
+    rules_json = ""
+    if data.get("rules") is not None:
+        rules_json = json.dumps(rules_mod.parse_rules(data["rules"]))
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO consultants(name, email, phone, location, visa_status,
-               linkedin_url, notes, emp_pref, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               linkedin_url, notes, emp_pref, rules_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data.get("name", "").strip(),
                 data.get("email", ""),
@@ -405,6 +422,7 @@ def create_consultant(data: dict) -> dict:
                 data.get("linkedin_url", ""),
                 data.get("notes", ""),
                 _clean_pref(data.get("emp_pref", "")),
+                rules_json,
                 now_iso(),
             ),
         )
@@ -440,6 +458,9 @@ def update_consultant(cid: int, data: dict) -> dict | None:
         if f in data:
             sets.append(f"{f}=?")
             vals.append(_clean_pref(data[f]) if f == "emp_pref" else data[f])
+    if "rules" in data:
+        sets.append("rules_json=?")
+        vals.append(json.dumps(rules_mod.parse_rules(data["rules"])))
     if sets:
         vals.append(cid)
         with get_conn() as conn:
@@ -497,7 +518,7 @@ def consultants_with_resumes() -> list:
     for r in rows:
         d = dict(r)
         d["skills"] = json.loads(d.pop("skills_json") or "[]")
-        out.append(d)
+        out.append(_with_rules(d))
     return out
 
 
@@ -848,7 +869,9 @@ def queue_application(match_id: int, tailored_resume_id: int | None = None) -> d
         cur = conn.execute(
             """INSERT INTO applications(match_id, status, tailored_resume_id,
                updated_at) VALUES (?, 'queued', ?, ?)
-               ON CONFLICT(match_id) DO UPDATE SET updated_at=excluded.updated_at""",
+               ON CONFLICT(match_id) DO UPDATE SET updated_at=excluded.updated_at,
+               tailored_resume_id=COALESCE(excluded.tailored_resume_id,
+                                           applications.tailored_resume_id)""",
             (match_id, tailored_resume_id, now_iso()),
         )
         conn.commit()

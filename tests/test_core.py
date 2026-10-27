@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import autolearn, contact, db, emptype, market, matcher, office, portals, skills, tailor, usa  # noqa: E402
+from app import autolearn, contact, db, emptype, market, matcher, office, portals, rules, skills, tailor, usa  # noqa: E402
 from app.sources import urlimport  # noqa: E402
 
 
@@ -1712,6 +1712,234 @@ class CompanyTests(unittest.TestCase):
             self.assertEqual(self.names("Y"), [])
         finally:
             persist._last_sig = old
+
+class StandingRulesTests(unittest.TestCase):
+    """Per-consultant standing rules: parsing, storage, and rules_allow."""
+    RESUME = ("Priya Nair\nQA Manager | Dallas, TX\n\nSUMMARY\nQA leader.\n\n"
+              "TECHNICAL SKILLS\nLanguages: Java, SQL\nTools: Selenium, Jenkins\n")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "t.db"
+        db.init_db()
+
+    def tearDown(self):
+        db.DB_PATH = self._old
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _job(**kw):
+        job = {"title": "QA Manager", "company": "Co", "location": "Dallas, TX",
+               "remote_flag": 0, "description": "Requirements: Java, Selenium",
+               "salary": ""}
+        job.update(kw)
+        return job
+
+    def test_empty_rules_allow_everything(self):
+        for consultant in ({}, {"rules": None}, {"rules": {}},
+                           {"rules_json": ""}, {"rules_json": "not json"}):
+            ok, _ = rules.rules_allow(consultant, self._job())
+            self.assertTrue(ok, consultant)
+        self.assertEqual(rules.parse_rules(None), rules.empty_rules())
+
+    def test_title_allow_and_block(self):
+        c = {"rules": {"titles": ["Data Engineer", "Java"]}}
+        ok, _ = rules.rules_allow(c, self._job(title="Senior Java Developer"))
+        self.assertTrue(ok)
+        ok, reason = rules.rules_allow(c, self._job(title="QA Manager"))
+        self.assertFalse(ok)
+        self.assertIn("title", reason)
+
+    def test_exclusion_keyword_wins_over_matching_title(self):
+        c = {"rules": {"titles": ["QA"], "exclude_keywords": ["clearance"]}}
+        job = self._job(title="QA Lead",
+                        description="Active clearance required. Java, Selenium")
+        ok, reason = rules.rules_allow(c, job)
+        self.assertFalse(ok)
+        self.assertIn("clearance", reason)
+
+    def test_exclude_client_matches_company(self):
+        c = {"rules": {"exclude_clients": ["acme"]}}
+        ok, reason = rules.rules_allow(c, self._job(company="Acme Corp"))
+        self.assertFalse(ok)
+        self.assertIn("acme", reason.lower())
+        ok, _ = rules.rules_allow(c, self._job(company="Other LLC"))
+        self.assertTrue(ok)
+
+    def test_remote_only(self):
+        c = {"rules": {"remote_only": True}}
+        ok, _ = rules.rules_allow(c, self._job(remote_flag=1, location=""))
+        self.assertTrue(ok)
+        ok, _ = rules.rules_allow(c, self._job(location="Remote - US"))
+        self.assertTrue(ok)
+        ok, reason = rules.rules_allow(c, self._job(location="Dallas, TX"))
+        self.assertFalse(ok)
+        self.assertIn("remote", reason)
+
+    def test_locations_block_unlisted_but_never_remote(self):
+        c = {"rules": {"locations": ["Houston"]}}
+        ok, _ = rules.rules_allow(c, self._job(location="Houston, TX"))
+        self.assertTrue(ok)
+        ok, reason = rules.rules_allow(c, self._job(location="Chicago, IL"))
+        self.assertFalse(ok)
+        self.assertIn("location", reason)
+        # a remote job is not blocked by a location list
+        ok, _ = rules.rules_allow(c, self._job(location="Chicago, IL",
+                                               remote_flag=1))
+        self.assertTrue(ok)
+
+    def test_min_rate(self):
+        c = {"rules": {"min_rate": 120000}}
+        ok, reason = rules.rules_allow(c, self._job(salary="$100,000 - $110,000"))
+        self.assertFalse(ok)
+        self.assertIn("min rate", reason)
+        ok, _ = rules.rules_allow(c, self._job(salary="$130,000"))
+        self.assertTrue(ok)
+        ok, _ = rules.rules_allow(c, self._job(salary="$150k"))
+        self.assertTrue(ok)
+        # hourly figures are annualised before comparing
+        ok, _ = rules.rules_allow(c, self._job(salary="$50/hr"))
+        self.assertFalse(ok)
+        ok, _ = rules.rules_allow(c, self._job(salary="$65 per hour"))
+        self.assertTrue(ok)
+        # missing or unreadable salary never blocks
+        ok, _ = rules.rules_allow(c, self._job(salary=""))
+        self.assertTrue(ok)
+        ok, _ = rules.rules_allow(c, self._job(salary="competitive"))
+        self.assertTrue(ok)
+
+    def test_rules_round_trip_through_db(self):
+        want = {"titles": ["Java Developer"], "locations": ["Houston, TX"],
+                "remote_only": True, "min_rate": 120000,
+                "exclude_keywords": ["clearance"], "exclude_clients": ["Acme"]}
+        c = db.create_consultant({"name": "Priya Nair", "rules": want})
+        self.assertEqual(c["rules"], want)
+        self.assertEqual(db.get_consultant(c["id"])["rules"], want)
+        self.assertEqual(db.list_consultants()[0]["rules"], want)
+        # no rules sent -> the empty shape, allow-everything
+        plain = db.create_consultant({"name": "No Rules"})
+        self.assertEqual(plain["rules"], rules.empty_rules())
+        # updating replaces the stored rules
+        changed = dict(want, min_rate=90000, remote_only=False)
+        got = db.update_consultant(c["id"], {"rules": changed})
+        self.assertEqual(got["rules"], changed)
+        # and a pre-existing row gains the parsed default too
+        self.assertEqual(db.get_consultant(plain["id"])["rules"],
+                         rules.empty_rules())
+
+
+class AutopilotQueueTests(unittest.TestCase):
+    """Tailor at/above the cutoff auto-files drafts into the apply queue
+    (auto_queue_tailored), and standing rules gate every agent action."""
+    RESUME = StandingRulesTests.RESUME
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "t.db"
+        db.init_db()
+
+    def tearDown(self):
+        matcher._jd_skills.cache_clear()
+        db.DB_PATH = self._old
+        self.tmp.cleanup()
+
+    def _consultant(self, rules=None):
+        data = {"name": "Priya Nair"}
+        if rules is not None:
+            data["rules"] = rules
+        c = db.create_consultant(data)
+        db.upsert_resume(c["id"], "r.txt", self.RESUME,
+                         skills.extract_skills(self.RESUME))
+        return c
+
+    def _match(self, cid, title, score, company="Co", salary=""):
+        job = {"source": "t", "source_id": title, "title": title,
+               "company": company, "location": "", "remote_flag": 0,
+               "url": "", "description": "Requirements: Java, Selenium, Kafka",
+               "posted_at": "", "salary": salary, "employment_type": ""}
+        jid = db.insert_job(job)
+        return db.insert_match(cid, jid, score, {}, [])
+
+    def test_tailor_queues_draft_with_resume_attached(self):
+        c = self._consultant()
+        self._match(c["id"], "QA Manager", 90.0)
+        got = office._tailor(db.get_settings())
+        self.assertEqual(got["drafted"], 1)
+        self.assertEqual(got["queued"], 1)
+        apps = db.list_applications()
+        self.assertEqual(len(apps), 1)
+        self.assertEqual(apps[0]["status"], "queued")
+        self.assertEqual(apps[0]["tailored_resume_id"],
+                         got["drafts"][0]["tailored_id"])
+        self.assertFalse(got["queued_items"][0]["attached"])
+        # a second run files nothing twice
+        again = office._tailor(db.get_settings())
+        self.assertEqual((again["drafted"], again["queued"]), (0, 0))
+        self.assertEqual(len(db.list_applications()), 1)
+
+    def test_auto_queue_off_keeps_drafts_only(self):
+        db.set_setting("auto_queue_tailored", "0")
+        c = self._consultant()
+        self._match(c["id"], "QA Manager", 90.0)
+        got = office._tailor(db.get_settings())
+        self.assertEqual(got["drafted"], 1)
+        self.assertEqual(got["queued"], 0)
+        self.assertEqual(db.list_applications(), [])
+
+    def test_backfill_attaches_existing_draft_to_queued_match(self):
+        c = self._consultant()
+        mid = self._match(c["id"], "QA Manager", 90.0)
+        tid = db.insert_tailored(mid, "tailored text", "keyword-fallback", [])
+        db.queue_application(mid)  # queued by hand, without the resume
+        self.assertIsNone(db.list_applications()[0]["tailored_resume_id"])
+        got = office._tailor(db.get_settings())
+        self.assertEqual(got["drafted"], 0)      # the draft already existed
+        self.assertEqual(got["queued"], 1)
+        self.assertTrue(got["queued_items"][0]["attached"])
+        self.assertEqual(db.list_applications()[0]["tailored_resume_id"], tid)
+
+    def test_backfill_queues_unqueued_draft(self):
+        c = self._consultant()
+        mid = self._match(c["id"], "QA Manager", 90.0)
+        db.insert_tailored(mid, "tailored text", "keyword-fallback", [])
+        got = office._tailor(db.get_settings())
+        self.assertEqual(got["queued"], 1)
+        apps = db.list_applications()
+        self.assertEqual(len(apps), 1)
+        self.assertIsNotNone(apps[0]["tailored_resume_id"])
+
+    def test_rule_blocked_match_is_neither_drafted_nor_queued(self):
+        c = self._consultant(rules={"titles": ["Data Engineer"]})
+        self._match(c["id"], "QA Manager", 95.0)
+        got = office._tailor(db.get_settings())
+        self.assertEqual(got["drafted"], 0)
+        self.assertEqual(got["queued"], 0)
+        self.assertEqual(got["skipped_by_rules"], 1)
+        self.assertEqual(db.list_applications(), [])
+        with db.get_conn() as conn:
+            n = conn.execute("SELECT COUNT(*) AS n FROM tailored_resumes").fetchone()["n"]
+        self.assertEqual(n, 0)
+
+    def test_rule_blocked_backfill_is_not_attached(self):
+        # the job description names Kafka; the consultant rules it out
+        c = self._consultant(rules={"exclude_keywords": ["kafka"]})
+        mid = self._match(c["id"], "QA Manager", 90.0)
+        db.insert_tailored(mid, "tailored text", "keyword-fallback", [])
+        db.queue_application(mid)
+        got = office._tailor(db.get_settings())
+        self.assertEqual(got["queued"], 0)
+        self.assertGreaterEqual(got["skipped_by_rules"], 1)
+        self.assertIsNone(db.list_applications()[0]["tailored_resume_id"])
+
+    def test_rules_do_not_change_matching(self):
+        # standing rules gate agent actions only: the match itself remains
+        c = self._consultant(rules={"titles": ["Data Engineer"],
+                                    "min_rate": 500000})
+        mid = self._match(c["id"], "QA Manager", 95.0, salary="$10")
+        self.assertEqual([m["id"] for m in db.list_matches()], [mid])
+
 
 if __name__ == "__main__":
     unittest.main()

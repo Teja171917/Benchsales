@@ -919,6 +919,7 @@ def api_put_settings(data: dict):
                "collect_interval_minutes", "usa_only", "collect_emp_types",
                "auto_queries", "max_queries", "auto_learn_skills",
                "adzuna_daily_budget", "tailor_cutoff", "tailor_max_per_run",
+               "auto_queue_tailored",
                "resume_folder_url", "google_api_key", "resume_import_minutes"}
     for k, v in data.items():
         if k not in allowed:

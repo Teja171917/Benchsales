@@ -278,6 +278,8 @@ async function renderConsultants() {
 
 function consultantModal(c) {
   c = c || {};
+  const r = c.rules || {};
+  const rlist = (a) => esc((a || []).join(", "));
   openModal(`
     <h2>${c.id ? "Edit" : "Add"} consultant</h2>
     <div class="kv">
@@ -293,16 +295,33 @@ function consultantModal(c) {
     </div>
     <div class="muted" style="margin-bottom:8px">Target roles: the jobs this person should get, separated by commas. BenchPilot searches for these roles and only matches jobs whose title fits one of them.</div>
     <div class="muted" style="margin-bottom:8px">Open to: leave all unchecked to match every engagement type. If you tick some, jobs that explicitly list only other types (e.g. "C2C only") are not matched to this consultant.</div>
+    <h3 style="margin:10px 0 6px">Standing rules</h3>
+    <div class="kv">
+      <label>Job titles</label><input type="text" id="m-rules-titles" value="${rlist(r.titles)}" placeholder="Java Developer, Data Engineer">
+      <label>Locations</label><input type="text" id="m-rules-locations" value="${rlist(r.locations)}" placeholder="Houston, TX, Austin, TX">
+      <label>Exclude keywords</label><input type="text" id="m-rules-exkw" value="${rlist(r.exclude_keywords)}" placeholder="clearance, secret">
+      <label>Exclude clients</label><input type="text" id="m-rules-excl" value="${rlist(r.exclude_clients)}" placeholder="Acme Corp">
+      <label>Min rate (annual $)</label><input type="number" id="m-rules-rate" min="0" step="1000" value="${r.min_rate ? esc(String(r.min_rate)) : ""}" placeholder="120000">
+      <label>Remote only</label><input type="checkbox" id="m-rules-remote" ${r.remote_only ? "checked" : ""}>
+    </div>
+    <div class="muted" style="margin-bottom:8px">Standing rules gate the agents only: the Tailor won't draft for, and the office won't queue, jobs outside these rules. Matching and scores don't change. Lists are comma-separated; leave everything blank to let the agents act on every match.</div>
     <div class="row"><button class="btn primary" id="m-save">Save</button>
     <button class="btn" id="m-cancel">Cancel</button></div>`);
   $("#m-cancel").onclick = closeModal;
   $("#m-save").onclick = async () => {
+    const split = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
     const data = {name: $("#m-name").value, email: $("#m-email").value,
       phone: $("#m-phone").value, location: $("#m-location").value,
       visa_status: $("#m-visa").value, linkedin_url: $("#m-li").value,
       notes: $("#m-notes").value,
       emp_pref: readEmp($("#m-emp"), "data-memp").join(","),
-      target_roles: $("#m-roles").value.trim()};
+      target_roles: $("#m-roles").value.trim(),
+      rules: {titles: split($("#m-rules-titles").value),
+        locations: split($("#m-rules-locations").value),
+        exclude_keywords: split($("#m-rules-exkw").value),
+        exclude_clients: split($("#m-rules-excl").value),
+        remote_only: $("#m-rules-remote").checked,
+        min_rate: Number($("#m-rules-rate").value) || 0}};
     if (c.id) await api(`/api/consultants/${c.id}`, {method: "PUT", body: JSON.stringify(data)});
     else await api("/api/consultants", {method: "POST", body: JSON.stringify(data)});
     closeModal();

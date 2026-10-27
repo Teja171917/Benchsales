@@ -4,9 +4,13 @@ An orchestrator that runs specialized agents on a schedule, so the
 recruiting pipeline keeps moving while the team is away:
 
   - Scout:       finds new high-quality matches since the last run
-  - Tailor:      pre-drafts tailored resumes for top matches (drafts only —
-                  flagged skills still need a human acknowledgment before
-                  anything is queued for apply)
+  - Tailor:      pre-drafts tailored resumes for top matches and, with the
+                  auto_queue_tailored setting on (the default), files each
+                  drafted match into the apply queue with the tailored
+                  resume attached — the queue is a worklist, not a
+                  submission. Flagged skills still need a human
+                  acknowledgment; a consultant's standing rules can bar
+                  whole categories of jobs from any agent action
   - Watchdog:    flags pipeline items going cold (queued/applied with no
                   movement)
   - Market Analyst: per-consultant demand briefing - which of their skills
@@ -26,12 +30,14 @@ safe issues themselves. Compliance quarantines mismatched matches,
 Market Analyst expands search queries for hot uncovered skills, and
 Watchdog leaves follow-up reminders on stale applications. Every action is
 logged in the briefing and reversible. The app never sends email, never
-queues applications, and never acknowledges resume skills on its own.
+submits an application to an employer, and never acknowledges resume
+skills on its own.
 """
 import json
 from datetime import datetime, timedelta, timezone
 
 from app import db
+from app import rules as rules_mod
 from app import tailor as tailor_mod
 from app import market as market_mod
 from app import emptype
@@ -41,6 +47,7 @@ from app.skills import display_name, extract_skills
 TAILOR_SCORE_CUTOFF = 65  # default: draft tailors for matches at/above this (Settings can change it)
 OUTREACH_SCORE_CUTOFF = 80  # draft outreach emails for matches at/above this
 MAX_DRAFTS_PER_RUN = 10   # default safety cap per office run (each drafting agent)
+MAX_QUEUE_ACTIONS_PER_RUN = 25  # cap on Tailor queue/attach actions per run
 STALE_QUEUED_DAYS = 3     # queued with no movement
 STALE_APPLIED_DAYS = 14   # applied with no update
 MARKET_WINDOW_DAYS = 30   # demand window for the Market Analyst
@@ -97,12 +104,25 @@ def _scout(settings, since):
             "actions": []}
 
 
-def _has_draft(match_id):
+def _draft_id(match_id):
+    """The newest tailored draft for a match, or None."""
     with db.get_conn() as conn:
         r = conn.execute(
-            "SELECT id FROM tailored_resumes WHERE match_id=? LIMIT 1",
+            "SELECT id FROM tailored_resumes WHERE match_id=? "
+            "ORDER BY id DESC LIMIT 1", (match_id,)).fetchone()
+        return r["id"] if r else None
+
+
+def _has_draft(match_id):
+    return _draft_id(match_id) is not None
+
+
+def _application(match_id):
+    with db.get_conn() as conn:
+        r = conn.execute(
+            "SELECT id, tailored_resume_id FROM applications WHERE match_id=?",
             (match_id,)).fetchone()
-        return r is not None
+        return dict(r) if r else None
 
 
 def _is_queued(match_id):
@@ -132,12 +152,58 @@ def _potential(full, flagged):
     return r["score"]
 
 
+def _job_view(m, full=None):
+    """The job fields the standing rules look at, taken from a match row;
+    only the full record carries the job description."""
+    return {"title": m.get("job_title") or "",
+            "company": m.get("company") or "",
+            "location": m.get("location") or "",
+            "remote_flag": m.get("remote_flag"),
+            "salary": m.get("salary") or "",
+            "description": (full or {}).get("job_description") or ""}
+
+
 def _tailor(settings):
-    """Draft tailored resumes for good matches that lack one. Drafts only.
-    Matches Compliance quarantined are skipped (wrong employment type)."""
+    """Draft tailored resumes for good matches that lack one.
+
+    Matches Compliance quarantined are skipped (wrong employment type),
+    and so is any match the consultant's standing rules block - agents
+    never spend a tailor call on a job a person already ruled out.
+
+    With auto_queue_tailored on (the default), every drafted match is
+    also filed into the apply queue with its tailored resume attached,
+    and drafts from earlier runs are synced into the queue the same way
+    (queued-without-a-resume entries pick their draft up). Queueing is
+    not submitting: a person still reviews the queue and applies."""
     cutoff = _num(settings, "tailor_cutoff", TAILOR_SCORE_CUTOFF)
     cap = _num(settings, "tailor_max_per_run", MAX_DRAFTS_PER_RUN)
-    drafted, errors = [], []
+    auto_queue = (settings.get("auto_queue_tailored") or "1") == "1"
+    drafted, queued, errors = [], [], []
+    skipped_rules = 0
+    queue_actions = 0
+    consultants = {}
+
+    def consultant(cid):
+        if cid not in consultants:
+            consultants[cid] = db.get_consultant(cid) or {}
+        return consultants[cid]
+
+    def allowed(m, full=None):
+        ok, _reason = rules_mod.rules_allow(
+            consultant(m["consultant_id"]), _job_view(m, full))
+        return ok
+
+    def file_in_queue(m, tid, attached):
+        nonlocal queue_actions
+        db.queue_application(m["id"], tid)
+        queue_actions += 1
+        queued.append({
+            "match_id": m["id"], "tailored_id": tid,
+            "consultant_name": m["consultant_name"],
+            "job_title": m["job_title"], "company": m["company"],
+            "score": m["score"], "attached": attached,
+        })
+
     candidates = [m for m in db.list_matches(min_score=cutoff)
                   if not m.get("compliance_flag")
                   and not _has_draft(m["id"]) and not _is_queued(m["id"])]
@@ -146,6 +212,9 @@ def _tailor(settings):
             break
         full = db.get_match(m["id"])
         if not full or not full.get("resume_text"):
+            continue
+        if not allowed(m, full):
+            skipped_rules += 1
             continue
         try:
             result = tailor_mod.tailor_match(full, settings)
@@ -168,7 +237,33 @@ def _tailor(settings):
             "tailored_by": result["tailored_by"],
             "flagged": result["added_skills_flagged"],
         })
+        if auto_queue and queue_actions < MAX_QUEUE_ACTIONS_PER_RUN:
+            file_in_queue(m, tid, attached=False)
+
+    if auto_queue:
+        # backfill: drafts that already exist (earlier runs, manual
+        # tailoring) join the queue too, and entries queued without a
+        # resume pick their draft up
+        done = {d["match_id"] for d in drafted}
+        for m in db.list_matches(min_score=cutoff):
+            if queue_actions >= MAX_QUEUE_ACTIONS_PER_RUN:
+                break
+            if m.get("compliance_flag") or m["id"] in done:
+                continue
+            tid = _draft_id(m["id"])
+            if not tid:
+                continue
+            app = _application(m["id"])
+            if app and app.get("tailored_resume_id"):
+                continue
+            if not allowed(m, db.get_match(m["id"])):
+                skipped_rules += 1
+                continue
+            file_in_queue(m, tid, attached=bool(app))
+
     return {"drafted": len(drafted), "drafts": drafted,
+            "queued": len(queued), "queued_items": queued,
+            "skipped_by_rules": skipped_rules,
             "cutoff": cutoff, "errors": errors[:5], "actions": []}
 
 
