@@ -659,6 +659,8 @@ def api_live_search(data: dict):
         enabled_sources = set(db.DEFAULT_ENABLED_SOURCES)
     if dice.enabled(settings):
         enabled_sources.add("dice")       # Dice's connector is free: on unless turned off
+    if smartrecruiters.enabled(settings):
+        enabled_sources.add("smartrecruiters")   # staffing firms feed: on unless turned off
     query = {"title": title, "location": location}
     emp_wanted = emptype.parse_wanted(",".join(data.get("emp") or [])
                                       if isinstance(data.get("emp"), list)

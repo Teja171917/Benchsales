@@ -39,7 +39,9 @@ def sr_firms() -> list[dict]:
 
 
 def enabled(settings: dict) -> bool:
-    return True   # public API, no key; gating is via enabled_sources
+    # Public API, no key — on by default like Dice's connector; a company
+    # turns it off with the staffing_enabled setting.
+    return settings.get("staffing_enabled", "1") == "1"
 
 
 def _postings(identifier: str) -> list[dict]:

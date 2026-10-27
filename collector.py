@@ -132,6 +132,8 @@ def _run() -> dict:
             enabled_sources.add("monster")    # an Apify token means "use Monster"
         if name == "dice" and mod.enabled(settings):
             enabled_sources.add("dice")       # free official connector: on by default
+        if name == "smartrecruiters" and mod.enabled(settings):
+            enabled_sources.add("smartrecruiters")   # no-key public feed: on by default
         if name not in enabled_sources:
             st["status"] = "disabled in settings"
         elif not mod.enabled(settings):
