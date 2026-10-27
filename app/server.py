@@ -30,32 +30,28 @@ SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster, smartr
 app = FastAPI(title="BenchPilot", version="1.0")
 
 
-_ready = set()   # company databases already prepared since start-up
-
-
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    if os.environ.get("BENCHPILOT_PASSWORD") or db.companies():
-        target = False
+    pwd = os.environ.get("BENCHPILOT_PASSWORD")
+    if pwd:
+        ok = False
         auth = request.headers.get("authorization", "")
         if auth.startswith("Basic "):
             try:
                 decoded = base64.b64decode(auth[6:]).decode("utf-8", "ignore")
                 user, _, given = decoded.partition(":")
-                target = db.login_target(user, given)
+                ok = secrets.compare_digest(given.encode(), pwd.encode())
+                # optional fixed username (Replit Secret BENCHPILOT_USERNAME)
+                want_user = os.environ.get("BENCHPILOT_USERNAME", "")
+                if want_user:
+                    ok = ok and secrets.compare_digest(
+                        user.strip().lower().encode(), want_user.strip().lower().encode())
             except Exception:
-                target = False
-        if target is False:
+                ok = False
+        if not ok:
             return JSONResponse({"detail": "authentication required"},
                                 status_code=401,
                                 headers={"WWW-Authenticate": 'Basic realm="BenchPilot"'})
-        # everything in this request reads and writes only this company's file
-        db.set_current(target)
-        if target is not None and str(target) not in _ready:
-            db.init_db()
-            _ready.add(str(target))
-    else:
-        db.set_current(None)
     response = await call_next(request)
     # make browsers re-check the page files, so an update shows without Ctrl+Shift+R
     path = request.url.path
@@ -66,10 +62,8 @@ async def auth_gate(request: Request, call_next):
 
 @app.on_event("startup")
 def _startup():
-    persist.restore_all()      # bring back the saved databases first (Replit wipes the disk)
-    for path in db.all_paths():   # the main one and one per company
-        with db.use(path):
-            db.init_db()
+    persist.restore()          # bring back the saved database first (Replit wipes the disk)
+    db.init_db()
     persist.start_background()
     autolearn.sync_vocabulary()  # learned skills back into memory after a restart
     t = threading.Thread(target=_auto_collect_loop, daemon=True,
@@ -97,8 +91,7 @@ def _do_collect() -> dict:
         finally:
             _collect_status["running"] = False
             # stored in the database so a restart does not reset the schedule
-            with db.use(None):
-                db.set_setting("last_collect_at", datetime.now(timezone.utc).isoformat())
+            db.set_setting("last_collect_at", datetime.now(timezone.utc).isoformat())
     _collect_status["last_run_at"] = datetime.now(timezone.utc).isoformat()
     _collect_status["last_result"] = {
         "jobs_new": summary.get("jobs_new", 0),
@@ -108,22 +101,7 @@ def _do_collect() -> dict:
         "rescored": summary.get("rescored", 0),
         "queries": summary.get("queries", []),
     }
-    # what each company may see about this run: only its own part
-    _collect_status["by_db"] = {
-        path: {"jobs_new": summary.get("jobs_new", 0),
-               "matches_new": part.get("matches_new", 0),
-               "errors": summary.get("errors", []),
-               "learned_skills": part.get("learned_skills", []),
-               "rescored": part.get("rescored", 0),
-               "queries": part.get("queries", [])}
-        for path, part in (summary.get("per_db") or {}).items()}
     return summary
-
-
-def _last_result():
-    if db.is_main():
-        return _collect_status["last_result"]
-    return (_collect_status.get("by_db") or {}).get(str(db.current_path()))
 
 
 def _next_due(interval: int):
@@ -147,12 +125,10 @@ def _auto_collect_loop():
     setting, slowed down when needed to respect the job API's daily limit),
     then let the Agent Office work on the fresh jobs."""
     while True:
-        for path in db.all_paths():   # each company's own resume folder
-            try:
-                with db.use(path):
-                    _maybe_import_folder()   # new resumes first, so they get searched this round
-            except Exception:
-                pass
+        try:
+            _maybe_import_folder()   # new resumes first, so they get searched this round
+        except Exception:
+            pass
         try:
             interval = autolearn.effective_interval_minutes()
             if interval <= 0:
@@ -164,9 +140,7 @@ def _auto_collect_loop():
                     _do_collect()
         except Exception:
             pass  # collector records per-source errors; keep the loop alive
-        for path in db.all_paths():   # each company's agents work on its own data
-            with db.use(path):
-                _maybe_run_office()  # after the refresh, so it sees today's jobs
+        _maybe_run_office()  # after the refresh, so it sees today's jobs
         time.sleep(30)
 
 
@@ -237,11 +211,6 @@ def _safe_collect():
         pass
 
 
-def _main_setting(key: str) -> str:
-    with db.use(None):
-        return db.get_setting(key, "")
-
-
 @app.get("/api/collect/status")
 def api_collect_status():
     settings = db.get_settings()
@@ -256,9 +225,9 @@ def api_collect_status():
         "interval_wanted": wanted,
         "running": _collect_status["running"],
         "last_run_at": _collect_status["last_run_at"] or (
-            _main_setting("last_collect_at") or None),
+            settings.get("last_collect_at") or None),
         "next_run_at": _collect_status["next_run_at"] if interval > 0 else None,
-        "last_result": _last_result(),
+        "last_result": _collect_status["last_result"],
         "queries": queries,
         "auto_queries": settings.get("auto_queries", "1") == "1",
         "adzuna_used_today": db.usage_today("adzuna"),
@@ -471,22 +440,14 @@ async def api_resume_auto(file: UploadFile = File(...), kick: int = 1):
 
 
 # ---------- resume folder import (Google Drive) ----------
-_import_by_db = {}   # database path -> {"running", "last_run_at", "last_result"}
+_import_status = {"running": False, "last_run_at": None, "last_result": None}
 _import_lock = threading.Lock()
-
-
-def _imp() -> dict:
-    """Import status of the database in use (each company sees only its own)."""
-    return _import_by_db.setdefault(str(db.current_path()),
-                                    {"running": False, "last_run_at": None,
-                                     "last_result": None})
 
 
 def _do_import() -> dict:
     """Read new resumes from the Drive folder. Thread-safe, never raises."""
     if not _import_lock.acquire(blocking=False):
         return {"error": "an import is already running"}
-    _import_status = _imp()
     _import_status["running"] = True
     try:
         res = resume_import.run(_auto_resume)
@@ -531,13 +492,12 @@ def api_backup_status():
 
 @app.post("/api/backup/now")
 def api_backup_now():
-    persist.backup(force=True, path=db.current_path())
+    persist.backup(force=True)
     return persist.status()
 
 
 @app.get("/api/resume-import/status")
 def api_import_status():
-    _import_status = _imp()
     s = db.get_settings()
     with db.get_conn() as conn:
         n = conn.execute("SELECT COUNT(*) AS n FROM imported_files "
@@ -551,14 +511,10 @@ def api_import_status():
 
 @app.post("/api/resume-import/run")
 def api_import_run():
-    if _imp()["running"]:
+    if _import_status["running"]:
         return {"started": False}
-    path = db.current_path()
-
-    def work():   # a new thread does not inherit the request's company
-        with db.use(path):
-            _do_import()
-    threading.Thread(target=work, daemon=True, name="benchpilot-import").start()
+    threading.Thread(target=_do_import, daemon=True,
+                     name="benchpilot-import").start()
     return {"started": True}
 
 
@@ -954,7 +910,7 @@ def api_sources_status():
         name = mod.NAME
         last = {}
         try:
-            last = json.loads(_main_setting(f"last_run_{name}") or "{}")
+            last = json.loads(settings.get(f"last_run_{name}") or "{}")
         except json.JSONDecodeError:
             pass
         configured = mod.enabled(settings)

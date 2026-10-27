@@ -1,11 +1,8 @@
 """SQLite data layer for BenchPilot. stdlib sqlite3 only, no ORM."""
-import contextlib
-import contextvars
 import json
 import os
-import re
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import emptype
@@ -174,101 +171,9 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# ---- companies (one separate database file per company) ----
-# Replit Secret BENCHPILOT_COMPANIES, for example:
-#   {"X": {"username": "xuser", "password": "..."},
-#    "Y": {"username": "yuser", "password": "..."}}
-# Each company logs in with its own username and password and only ever
-# opens its own file (data/company_<name>.db). The main login
-# (BENCHPILOT_USERNAME / BENCHPILOT_PASSWORD) keeps the original database.
-# Jobs are searched once for everyone and copied into every company file;
-# the API call counters are kept only in the main database.
-_current = contextvars.ContextVar("benchpilot_db", default=None)
-
-
-def companies() -> list:
-    """[{"name", "username", "password", "path"}] from the Secret. Bad or
-    incomplete entries are skipped."""
-    try:
-        raw = json.loads(os.environ.get("BENCHPILOT_COMPANIES", "") or "{}")
-    except ValueError:
-        return []
-    out, seen = [], set()
-    if not isinstance(raw, dict):
-        return []
-    for name, v in raw.items():
-        if not isinstance(v, dict):
-            continue
-        user = str(v.get("username") or "").strip()
-        pwd = str(v.get("password") or "")
-        slug = re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_")
-        if not (slug and user and pwd) or slug in seen:
-            continue
-        seen.add(slug)
-        out.append({"name": str(name), "username": user, "password": pwd,
-                    "path": DB_PATH.parent / f"company_{slug}.db"})
-    return out
-
-
-def login_target(user: str, given: str):
-    """Which database a login opens: a company's file (its Path), the main
-    one (None), or False for a wrong username or password."""
-    import secrets
-    user = (user or "").strip().lower()
-    given = given or ""
-    for c in companies():
-        if secrets.compare_digest(user.encode(), c["username"].strip().lower().encode()):
-            if secrets.compare_digest(given.encode(), c["password"].encode()):
-                return c["path"]
-            return False
-    pwd = os.environ.get("BENCHPILOT_PASSWORD", "")
-    if not pwd or not secrets.compare_digest(given.encode(), pwd.encode()):
-        return False
-    # optional fixed username (Replit Secret BENCHPILOT_USERNAME)
-    want_user = os.environ.get("BENCHPILOT_USERNAME", "")
-    if want_user and not secrets.compare_digest(
-            user.encode(), want_user.strip().lower().encode()):
-        return False
-    return None
-
-
-def current_path() -> Path:
-    return Path(_current.get() or DB_PATH)
-
-
-def is_main() -> bool:
-    return current_path() == Path(DB_PATH)
-
-
-def all_paths() -> list:
-    """The main database first, then each company's."""
-    return [Path(DB_PATH)] + [c["path"] for c in companies()]
-
-
-def set_current(path) -> None:
-    """Point this request (or thread) at one database."""
-    _current.set(Path(path) if path else None)
-
-
-@contextlib.contextmanager
-def use(path):
-    """with db.use(path): ... - everything inside reads and writes that file."""
-    token = _current.set(Path(path) if path else None)
-    try:
-        yield
-    finally:
-        _current.reset(token)
-
-
-def _main_conn() -> sqlite3.Connection:
-    with use(None):
-        return get_conn()
-
-
 def get_conn() -> sqlite3.Connection:
-    path = current_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -320,33 +225,6 @@ def init_db() -> None:
                          "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                          (str(emptype.VERSION),))
         conn.commit()
-    if not is_main():
-        _copy_jobs_from_main()
-
-
-def _copy_jobs_from_main() -> None:
-    """A new company file starts with the jobs already found (last 30 days),
-    so its consultants get matches right away. Only jobs - nothing else."""
-    main = Path(DB_PATH)
-    if not main.exists():
-        return
-    with get_conn() as conn:
-        if conn.execute("SELECT COUNT(*) AS n FROM jobs").fetchone()["n"]:
-            return
-        conn.execute("ATTACH DATABASE ? AS m", (str(main),))
-        try:
-            conn.execute(
-                """INSERT OR IGNORE INTO jobs(source, source_id, title, company, location,
-                   remote_flag, url, description, posted_at, salary, employment_type,
-                   emp_tags, fetched_at)
-                   SELECT source, source_id, title, company, location, remote_flag, url,
-                   description, posted_at, salary, employment_type, emp_tags, fetched_at
-                   FROM m.jobs WHERE fetched_at >= ?""",
-                ((datetime.now(timezone.utc) - timedelta(days=30))
-                 .isoformat(),))
-            conn.commit()
-        finally:
-            conn.execute("DETACH DATABASE m")
 
 
 # ---- settings ----
@@ -561,7 +439,7 @@ def delete_learned_skill(skill: str) -> bool:
 # ---- daily API call budget (protects free-tier keys) ----
 def usage_today(source: str) -> int:
     day = now_iso()[:10]
-    with _main_conn() as conn:
+    with get_conn() as conn:
         r = conn.execute("SELECT hits FROM api_usage WHERE day=? AND source=?",
                          (day, source)).fetchone()
         return r["hits"] if r else 0
@@ -570,7 +448,7 @@ def usage_today(source: str) -> int:
 def usage_month(source: str) -> int:
     """Calls used this calendar month (UTC) - JSearch's free plan is 200 a month."""
     month = now_iso()[:7]
-    with _main_conn() as conn:
+    with get_conn() as conn:
         r = conn.execute("SELECT COALESCE(SUM(hits), 0) AS n FROM api_usage "
                          "WHERE source=? AND substr(day, 1, 7)=?", (source, month)).fetchone()
         return r["n"] if r else 0
@@ -578,7 +456,7 @@ def usage_month(source: str) -> int:
 
 def usage_add(source: str, hits: int) -> None:
     day = now_iso()[:10]
-    with _main_conn() as conn:
+    with get_conn() as conn:
         conn.execute(
             "INSERT INTO api_usage(day, source, hits) VALUES (?, ?, ?) "
             "ON CONFLICT(day, source) DO UPDATE SET hits = hits + excluded.hits",

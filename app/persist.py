@@ -14,9 +14,6 @@ SQLite file vanish. This module keeps a copy of that file in Replit
   Settings ("Data backup: OFF / ON").
 
 Without App Storage (for example on a laptop) everything is a no-op.
-
-Each company has its own database file (see db.companies()); each one is
-backed up as its own object (`benchpilot/company_<name>.db`).
 """
 import os
 import sqlite3
@@ -35,15 +32,7 @@ _state = {"enabled": False, "reason": "not started", "last_backup_at": None,
           "last_error": "", "restored": False, "size": 0}
 _store = None
 _lock = threading.Lock()
-_last_sig = {}   # database path -> (mtime, size) at its last backup
-
-
-def object_for(path) -> str:
-    """App Storage name for one database file (the main one keeps its old name)."""
-    p = Path(path)
-    if p == Path(db.DB_PATH):
-        return OBJECT
-    return "benchpilot/" + p.name
+_last_sig = None
 
 
 class _ReplitStore:
@@ -103,26 +92,26 @@ def _sig(path: Path):
         return None
 
 
-def restore(store=None, path=None) -> bool:
+def restore(store=None) -> bool:
     """Run once at start-up, BEFORE db.init_db(). True when the local file was
-    replaced by the backup. Default: the database in use (db.current_path())."""
+    replaced by the backup."""
+    global _last_sig
     store = store or _get_store()
     if store is None:
         return False
-    local_path = Path(path or db.current_path())
-    name = object_for(local_path)
     try:
-        if not store.exists(name):
+        if not store.exists(OBJECT):
             return False
         tmp = Path(tempfile.mkdtemp()) / "restore.db"
-        store.get(name, tmp)
+        store.get(OBJECT, tmp)
         remote = _stamp_of(tmp)
+        local_path = Path(db.DB_PATH)
         local = _stamp_of(local_path) if local_path.exists() else ""
         if not local_path.exists() or (remote and remote > local):
             local_path.parent.mkdir(parents=True, exist_ok=True)
             os.replace(tmp, local_path)
             _state.update(restored=True)
-            _last_sig[str(local_path)] = _sig(local_path)
+            _last_sig = _sig(local_path)
             return True
         return False
     except Exception as e:
@@ -130,30 +119,19 @@ def restore(store=None, path=None) -> bool:
         return False
 
 
-def restore_all(store=None) -> None:
-    for p in db.all_paths():
-        restore(store, p)
-
-
-def backup_all(store=None, force: bool = False) -> None:
-    for p in db.all_paths():
-        backup(store, force, p)
-
-
-def backup(store=None, force: bool = False, path=None) -> bool:
-    """Upload a snapshot if the database changed. Never raises.
-    Default: the database in use (db.current_path())."""
+def backup(store=None, force: bool = False) -> bool:
+    """Upload a snapshot if the database changed. Never raises."""
+    global _last_sig
     store = store or _get_store()
     if store is None:
         return False
     with _lock:
         try:
-            path = Path(path or db.current_path())
+            path = Path(db.DB_PATH)
             sig = _sig(path)
-            if sig is None or (sig == _last_sig.get(str(path)) and not force):
+            if sig is None or (sig == _last_sig and not force):
                 return False
-            with db.use(path):
-                db.set_setting("backup_stamp", datetime.now(timezone.utc).isoformat())
+            db.set_setting("backup_stamp", datetime.now(timezone.utc).isoformat())
             snap = Path(tempfile.mkdtemp()) / "snapshot.db"
             src = sqlite3.connect(path)
             dst = sqlite3.connect(snap)
@@ -162,10 +140,10 @@ def backup(store=None, force: bool = False, path=None) -> bool:
             finally:
                 dst.close()
                 src.close()
-            store.put(object_for(path), snap)
+            store.put(OBJECT, snap)
             _state.update(last_backup_at=datetime.now(timezone.utc).isoformat(),
                           last_error="", size=snap.stat().st_size)
-            _last_sig[str(path)] = _sig(path)   # after our own stamp write
+            _last_sig = _sig(path)   # after our own stamp write
             return True
         except Exception as e:
             _state.update(last_error=f"backup failed: {e.__class__.__name__}: {str(e)[:120]}")
@@ -176,7 +154,7 @@ def _loop():
     while True:
         time.sleep(INTERVAL)
         try:
-            backup_all()
+            backup()
         except Exception:
             pass
 
