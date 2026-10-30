@@ -48,16 +48,63 @@ def _within_budget(queries: list, summary: dict) -> list:
     return chosen
 
 
+def _merge(queries: list, more: list) -> None:
+    seen = {((q.get("title") or "").lower(), (q.get("location") or "").lower())
+            for q in queries}
+    for q in more:
+        k = ((q.get("title") or "").lower(), (q.get("location") or "").lower())
+        if k not in seen:
+            seen.add(k)
+            queries.append(q)
+
+
+def _prepare_all() -> tuple[list, dict]:
+    """Learn from every database's resumes and collect the searches they need.
+    Returns (all searches, {database: its own part})."""
+    queries, per_db = [], {}
+    for path in db.all_paths():
+        with db.use(path):
+            if not path.exists():
+                db.init_db()
+            try:
+                maintained = autolearn.maintain()
+            except Exception as e:  # noqa: BLE001 - never block job collection
+                maintained = {"error": str(e)}
+            own = autolearn.queries_for_run(db.get_settings())
+            has_people = bool(db.consultants_with_resumes())
+        per_db[str(path)] = {"queries": own if has_people else [],
+                             "learned_skills": maintained.get("learned", []),
+                             "rescored": maintained.get("rescored", 0),
+                             "matches_new": 0}
+        if has_people:
+            _merge(queries, own)
+    if not queries:   # nobody has a resume yet: the main database's searches
+        with db.use(None):
+            queries = autolearn.queries_for_run(db.get_settings())
+    return queries, per_db
+
+
+def _save_job(job: dict) -> bool:
+    """Save a job in the main database and in every company's. True if new."""
+    new = bool(db.insert_job(job))
+    for c in db.companies():
+        with db.use(c["path"]):
+            db.insert_job(job)
+    return new
+
+
 def run() -> dict:
-    # step 0: learn from the resumes we hold (new skills, refreshed skill
-    # lists, rescored matches) so the searches below use up-to-date data
-    maintained = {}
-    try:
-        maintained = autolearn.maintain()
-    except Exception as e:  # noqa: BLE001 - never block job collection
-        maintained = {"error": str(e)}
+    """One collection for everyone: the searches are done once (one set of API
+    calls), the jobs are copied into each company's database, and each
+    company's own consultants are matched inside their own database."""
+    with db.use(None):
+        return _run()
+
+
+def _run() -> dict:
+    queries, per_db = _prepare_all()
     settings = db.get_settings()
-    queries = autolearn.queries_for_run(settings)
+    main_part = per_db.get(str(db.DB_PATH), {})
     try:
         enabled_sources = set(json.loads(settings.get("enabled_sources") or "[]"))
     except json.JSONDecodeError:
@@ -71,9 +118,10 @@ def run() -> dict:
         "matches_new": 0,
         "errors": [],
         "queries": queries,
-        "learned_skills": maintained.get("learned", []),
-        "rescored": maintained.get("rescored", 0),
+        "learned_skills": main_part.get("learned_skills", []),
+        "rescored": main_part.get("rescored", 0),
         "budget_skipped": {},
+        "per_db": per_db,
     }
 
     for mod in SOURCES:
@@ -117,7 +165,7 @@ def run() -> dict:
                         batch = usa.filter_us(batch)
                     for job in batch:
                         fetched += 1
-                        if db.insert_job(job):
+                        if _save_job(job):
                             new += 1
                 if name == "monster":   # only a run that WORKED starts the 12-hour wait
                     db.set_setting("monster_last_run_at", datetime.now(timezone.utc).isoformat())
@@ -136,11 +184,19 @@ def run() -> dict:
             "at": summary["started"],
         }))
 
-    try:
-        summary["matches_removed"] = matcher.prune_misfits()
-        summary["matches_new"] = matcher.run_all()
-    except Exception as e:  # noqa: BLE001
-        summary["errors"].append(f"matcher: {e}")
+    summary["matches_removed"] = 0
+    for path in db.all_paths():   # each company is matched in its own file
+        with db.use(path):
+            try:
+                autolearn.sync_vocabulary()
+                summary["matches_removed"] += matcher.prune_misfits()
+                n = matcher.run_all()
+                per_db[str(path)]["matches_new"] = n
+                summary["matches_new"] += n
+            except Exception as e:  # noqa: BLE001
+                summary["errors"].append(f"matcher: {e}")
+    with db.use(None):
+        autolearn.sync_vocabulary()
 
     summary["finished"] = datetime.now(timezone.utc).isoformat()
     db.set_setting("last_collect_at", summary["finished"])
