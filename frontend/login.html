@@ -40,6 +40,17 @@
   </form>
   <div class="divider" id="ordiv">or</div>
   <button class="google" id="gbtn" type="button">Sign in with Google</button>
+  <p style="margin:18px 0 0; font-size:13px; color:#93a4bd; text-align:center">
+    <a href="#" id="basic-toggle" style="color:#7db4ff">Still using a shared company login?</a>
+  </p>
+  <form id="bf" style="display:none">
+    <label for="b-user">Company username</label>
+    <input id="b-user" type="text" autocomplete="username">
+    <label for="b-pass">Company password</label>
+    <input id="b-pass" type="password" autocomplete="current-password">
+    <button class="main" type="submit">Sign in with shared login</button>
+    <p style="font-size:12px; color:#64748b; margin:10px 0 0">Once in, open <b>Team accounts</b> to create your personal account.</p>
+  </form>
 </div>
 <script>
   var errBox = document.getElementById('err');
@@ -55,6 +66,22 @@
   }).catch(function () {});
   document.getElementById('gbtn').addEventListener('click', function () {
     location.href = '/api/auth/google/login';
+  });
+  document.getElementById('basic-toggle').addEventListener('click', function (e) {
+    e.preventDefault();
+    var bf = document.getElementById('bf');
+    bf.style.display = bf.style.display === 'none' ? 'block' : 'none';
+  });
+  document.getElementById('bf').addEventListener('submit', function (e) {
+    e.preventDefault();
+    fetch('/api/auth/basic-login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: document.getElementById('b-user').value,
+                             password: document.getElementById('b-pass').value })
+    }).then(function (r) {
+      if (r.ok) { location.href = '/'; return; }
+      return r.json().then(function (d) { showErr(d.detail || 'Sign-in failed.'); });
+    }).catch(function () { showErr('Could not reach the server.'); });
   });
   document.getElementById('f').addEventListener('submit', function (e) {
     e.preventDefault();

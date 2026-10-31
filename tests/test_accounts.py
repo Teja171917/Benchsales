@@ -199,6 +199,35 @@ class AccountHttpTests(unittest.TestCase):
                                    "password": "wrong-password"})
         self.assertEqual(r.status_code, 401)
 
+    def test_shared_login_cookie_flow_for_browsers(self):
+        # the shared company login signs in through the form endpoint...
+        r = self.client.post("/api/auth/basic-login",
+                             json={"username": "acme", "password": "acme-pw"})
+        self.assertEqual(r.status_code, 200, r.text)
+        cookie = r.headers.get("set-cookie", "")
+        self.assertIn("bp_basic=", cookie)
+        token = cookie.split("bp_basic=")[1].split(";")[0]
+        # ...and its cookie opens pages and APIs in a browser (no popup)
+        r = self.client.get("/", headers={"Cookie": f"bp_basic={token}"})
+        self.assertEqual(r.status_code, 200)
+        r = self.client.get("/api/auth/me",
+                            headers={"Cookie": f"bp_basic={token}"})
+        self.assertEqual(r.json()["basic_workspace"], "acme_staffing")
+        # ...including the Team page bootstrap for that workspace
+        r = self.client.post("/api/admin/users",
+                             headers={"Cookie": f"bp_basic={token}"},
+                             json={"email": "first@acme.com", "name": "First",
+                                   "password": "password-1", "role": "admin",
+                                   "workspace": "acme_staffing"})
+        self.assertEqual(r.status_code, 200, r.text)
+        # bad shared-login password and a tampered cookie are both refused
+        r = self.client.post("/api/auth/basic-login",
+                             json={"username": "acme", "password": "nope"})
+        self.assertEqual(r.status_code, 401)
+        r = self.client.get("/api/auth/me",
+                            headers={"Cookie": "bp_basic=AAAA.deadbeef"})
+        self.assertEqual(r.status_code, 401)
+
 
 if __name__ == "__main__":
     unittest.main()

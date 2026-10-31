@@ -304,6 +304,55 @@ def delete_session(token: str) -> None:
                      (_token_hash(token),))
 
 
+# ---------- legacy shared login, as a browser cookie ----------
+# Browsers cannot be offered the old Basic-auth popup once page loads
+# redirect to /login, so the shared company login gets its own
+# sign-in form: it verifies against db.login_target() and issues a
+# signed cookie naming the workspace. The cookie is HMAC-signed with a
+# server secret kept in the accounts settings table.
+
+def _server_secret() -> str:
+    _ensure()
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'server_secret'").fetchone()
+        if row and row["value"]:
+            return row["value"]
+        secret = secrets.token_urlsafe(48)
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value)"
+            " VALUES ('server_secret', ?)", (secret,))
+        return secret
+
+
+def sign_basic_token(target_path) -> str:
+    payload = json.dumps(
+        {"p": str(target_path) if target_path else "",
+         "e": time.time() + _SESSION_DAYS * 86400},
+        separators=(",", ":")).encode()
+    b64 = base64.urlsafe_b64encode(payload).decode()
+    sig = hmac.new(_server_secret().encode(), b64.encode(),
+                   hashlib.sha256).hexdigest()
+    return b64 + "." + sig
+
+
+def verify_basic_token(token: str):
+    """(True, target) for a valid shared-login cookie, else (False, None).
+    A target of None is the main workspace."""
+    try:
+        b64, sig = (token or "").split(".", 1)
+        expected = hmac.new(_server_secret().encode(), b64.encode(),
+                            hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return (False, None)
+        data = json.loads(base64.urlsafe_b64decode(b64.encode()))
+        if data["e"] < time.time():
+            return (False, None)
+        return (True, Path(data["p"]) if data["p"] else None)
+    except Exception:
+        return (False, None)
+
+
 # ---------- Google sign-in (active only when OAuth secrets are set) ----------
 
 def google_configured() -> bool:

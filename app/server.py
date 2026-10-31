@@ -33,7 +33,8 @@ app = FastAPI(title="BenchPilot", version="1.0")
 _ready = set()   # company databases already prepared since start-up
 
 
-PUBLIC_PATHS = {"/login", "/api/auth/login", "/api/auth/config",
+PUBLIC_PATHS = {"/login", "/api/auth/login", "/api/auth/basic-login",
+                "/api/auth/config",
                 "/api/auth/google/login", "/api/auth/google/callback",
                 "/favicon.ico"}
 SESSION_COOKIE = "bp_session"
@@ -57,7 +58,15 @@ async def auth_gate(request: Request, call_next):
                 target = accounts.target_path_for(user)
                 if target is not False:
                     request.state.user = user
-        # 2) legacy shared login (kept while a workspace migrates)
+        # 2) legacy shared login (kept while a workspace migrates):
+        #    its signed browser cookie first, then the Basic header
+        if target is False and request.state.user is None:
+            basic_cookie = request.cookies.get("bp_basic", "")
+            if basic_cookie:
+                ok, cookie_target = accounts.verify_basic_token(basic_cookie)
+                if ok:
+                    target = cookie_target
+                    request.state.basic_target = target
         if target is False and request.state.user is None:
             auth = request.headers.get("authorization", "")
             if auth.startswith("Basic "):
@@ -159,11 +168,34 @@ async def auth_login(request: Request):
     return _session_response(user)
 
 
+@app.post("/api/auth/basic-login")
+async def auth_basic_login(request: Request):
+    """The shared company login, for browsers: verifies the legacy
+    username/password and issues its signed cookie so the Team page
+    bootstrap (creating the first individual accounts) stays reachable
+    in a browser, where the old Basic popup no longer appears."""
+    body = await request.json()
+    username = (body.get("username") or "").strip()
+    if _login_rate_limited("basic:" + username.lower()):
+        raise HTTPException(429, "too many attempts — wait a few minutes")
+    target = db.login_target(username, body.get("password") or "")
+    if target is False:
+        _login_fails.setdefault("basic:" + username.lower(), []).append(time.time())
+        raise HTTPException(401, "username or password is not right")
+    resp = JSONResponse({"ok": True,
+                         "workspace": accounts._slug_for_path(target)})
+    resp.set_cookie("bp_basic", accounts.sign_basic_token(target),
+                    httponly=True, secure=True, samesite="lax",
+                    max_age=14 * 86400, path="/")
+    return resp
+
+
 @app.post("/api/auth/logout")
 async def auth_logout(request: Request):
     accounts.delete_session(request.cookies.get(SESSION_COOKIE, ""))
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(SESSION_COOKIE, path="/")
+    resp.delete_cookie("bp_basic", path="/")
     return resp
 
 
