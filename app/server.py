@@ -9,10 +9,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import autolearn, contact as contact_mod, db, emptype, market, portals, usa
+from app import accounts, autolearn, contact as contact_mod, db, emptype, market, portals, usa
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
@@ -33,22 +33,51 @@ app = FastAPI(title="BenchPilot", version="1.0")
 _ready = set()   # company databases already prepared since start-up
 
 
+PUBLIC_PATHS = {"/login", "/api/auth/login", "/api/auth/config",
+                "/api/auth/google/login", "/api/auth/google/callback",
+                "/favicon.ico"}
+SESSION_COOKIE = "bp_session"
+_NO_BASIC = object()   # request.state.basic_target marker: no legacy login used
+
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    if os.environ.get("BENCHPILOT_PASSWORD") or db.companies():
+    path = request.url.path
+    request.state.user = None
+    request.state.basic_target = _NO_BASIC
+    gated = bool(os.environ.get("BENCHPILOT_PASSWORD") or db.companies()
+                 or accounts.any_users())
+    if gated and path not in PUBLIC_PATHS:
         target = False
-        auth = request.headers.get("authorization", "")
-        if auth.startswith("Basic "):
-            try:
-                decoded = base64.b64decode(auth[6:]).decode("utf-8", "ignore")
-                user, _, given = decoded.partition(":")
-                target = db.login_target(user, given)
-            except Exception:
-                target = False
+        # 1) individual account session (the new way in)
+        token = request.cookies.get(SESSION_COOKIE, "")
+        if token:
+            user = accounts.resolve_session(token)
+            if user:
+                target = accounts.target_path_for(user)
+                if target is not False:
+                    request.state.user = user
+        # 2) legacy shared login (kept while a workspace migrates)
+        if target is False and request.state.user is None:
+            auth = request.headers.get("authorization", "")
+            if auth.startswith("Basic "):
+                try:
+                    decoded = base64.b64decode(auth[6:]).decode("utf-8", "ignore")
+                    user, _, given = decoded.partition(":")
+                    target = db.login_target(user, given)
+                except Exception:
+                    target = False
+            if target is not False:
+                request.state.basic_target = target
         if target is False:
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "authentication required"},
+                                    status_code=401,
+                                    headers={"WWW-Authenticate": 'Basic realm="BenchPilot"'})
+            if request.method == "GET":
+                return RedirectResponse("/login", status_code=302)
             return JSONResponse({"detail": "authentication required"},
-                                status_code=401,
-                                headers={"WWW-Authenticate": 'Basic realm="BenchPilot"'})
+                                status_code=401)
         # everything in this request reads and writes only this company's file
         db.set_current(target)
         if target is not None and str(target) not in _ready:
@@ -70,11 +99,223 @@ def _startup():
     for path in db.all_paths():   # the main one and one per company
         with db.use(path):
             db.init_db()
+    accounts.init_accounts()   # individual user logins live in their own file
     persist.start_background()
     autolearn.sync_vocabulary()  # learned skills back into memory after a restart
     t = threading.Thread(target=_auto_collect_loop, daemon=True,
                          name="benchpilot-auto-collect")
     t.start()
+
+
+# ---------- individual accounts: sign-in, sessions, admin ----------
+
+_login_fails = {}   # email -> [failure timestamps] (simple rate limit)
+
+
+def _login_rate_limited(email: str) -> bool:
+    now = time.time()
+    fails = [t for t in _login_fails.get(email, []) if now - t < 600]
+    _login_fails[email] = fails
+    return len(fails) >= 10
+
+
+def _public_user(user: dict) -> dict:
+    return {"email": user["email"], "name": user["name"],
+            "role": user["role"],
+            "workspace": user.get("company_slug") or "main"}
+
+
+def _session_response(user: dict) -> JSONResponse:
+    resp = JSONResponse({"ok": True, "user": _public_user(user)})
+    resp.set_cookie(SESSION_COOKIE, accounts.create_session(user["id"]),
+                    httponly=True, secure=True, samesite="lax",
+                    max_age=14 * 86400, path="/")
+    return resp
+
+
+@app.get("/login")
+def login_page():
+    return FileResponse(str(FRONTEND_DIR / "login.html"))
+
+
+@app.get("/api/auth/config")
+def auth_config():
+    return {"google": accounts.google_configured()}
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request):
+    body = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    if _login_rate_limited(email):
+        raise HTTPException(429, "too many attempts — wait a few minutes")
+    user = accounts.authenticate(email, body.get("password") or "")
+    if not user:
+        _login_fails.setdefault(email, []).append(time.time())
+        raise HTTPException(401, "email or password is not right")
+    if accounts.target_path_for(user) is False:
+        raise HTTPException(403, "this account's workspace is unavailable")
+    _login_fails.pop(email, None)
+    return _session_response(user)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    accounts.delete_session(request.cookies.get(SESSION_COOKIE, ""))
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    user = getattr(request.state, "user", None)
+    if user:
+        return {"user": _public_user(user), "basic_workspace": None,
+                "workspace_users": accounts.count_users(user.get("company_slug")),
+                "admin_scope": sorted(_admin_scope(request))}
+    basic = getattr(request.state, "basic_target", _NO_BASIC)
+    if basic is not _NO_BASIC:
+        slug = accounts._slug_for_path(basic)
+        return {"user": None, "basic_workspace": slug,
+                "workspace_users": accounts.count_users(
+                    None if slug == "main" else slug),
+                "admin_scope": sorted(_admin_scope(request))}
+    return {"user": None, "basic_workspace": None, "workspace_users": 0,
+            "admin_scope": []}
+
+
+@app.get("/api/auth/google/login")
+def google_login(request: Request):
+    if not accounts.google_configured():
+        raise HTTPException(404, "Google sign-in is not set up yet")
+    import urllib.parse
+    state = secrets.token_urlsafe(24)
+    redirect_uri = str(request.base_url) + "api/auth/google/callback"
+    params = {"client_id": os.environ["GOOGLE_CLIENT_ID"],
+              "redirect_uri": redirect_uri, "response_type": "code",
+              "scope": "openid email profile", "state": state,
+              "prompt": "select_account"}
+    resp = RedirectResponse(
+        "https://accounts.google.com/o/oauth2/v2/auth?"
+        + urllib.parse.urlencode(params), status_code=302)
+    resp.set_cookie("bp_gstate", state, httponly=True, secure=True,
+                    samesite="lax", max_age=600, path="/")
+    return resp
+
+
+@app.get("/api/auth/google/callback")
+def google_callback(request: Request, code: str = "", state: str = ""):
+    if not accounts.google_configured():
+        raise HTTPException(404, "Google sign-in is not set up yet")
+    if not state or state != request.cookies.get("bp_gstate", ""):
+        return RedirectResponse("/login?error=google", status_code=302)
+    import requests as http
+    redirect_uri = str(request.base_url) + "api/auth/google/callback"
+    try:
+        tok = http.post("https://oauth2.googleapis.com/token", data={
+            "code": code, "client_id": os.environ["GOOGLE_CLIENT_ID"],
+            "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
+            "redirect_uri": redirect_uri, "grant_type": "authorization_code"},
+            timeout=15).json()
+        info = http.get("https://openidconnect.googleapis.com/v1/userinfo",
+                        headers={"Authorization": "Bearer " + tok["access_token"]},
+                        timeout=15).json()
+    except Exception:
+        return RedirectResponse("/login?error=google", status_code=302)
+    if not info.get("email") or info.get("email_verified") is not True:
+        return RedirectResponse("/login?error=google", status_code=302)
+    user = accounts.google_user_for_email(info["email"])
+    if not user or accounts.target_path_for(user) is False:
+        return RedirectResponse("/login?error=noaccount", status_code=302)
+    resp = RedirectResponse("/", status_code=302)
+    resp.set_cookie(SESSION_COOKIE, accounts.create_session(user["id"]),
+                    httponly=True, secure=True, samesite="lax",
+                    max_age=14 * 86400, path="/")
+    return resp
+
+
+def _admin_scope(request: Request) -> set:
+    """Workspace slugs the caller may manage users for: a session admin
+    manages their own workspace; the legacy main login manages all; a
+    legacy company login manages its own workspace."""
+    user = getattr(request.state, "user", None)
+    if user and user.get("role") == "admin":
+        return {user.get("company_slug") or "main"}
+    basic = getattr(request.state, "basic_target", _NO_BASIC)
+    if basic is not _NO_BASIC:
+        if basic is None:
+            return set(accounts.workspace_slugs())
+        return {accounts._slug_for_path(basic)}
+    return set()
+
+
+def _require_admin(request: Request) -> set:
+    scope = _admin_scope(request)
+    if not scope:
+        raise HTTPException(403, "admin access required")
+    return scope
+
+
+def _slug_to_company(slug: str):
+    return None if slug == "main" else slug
+
+
+@app.get("/api/admin/users")
+def admin_list_users(request: Request):
+    scope = _require_admin(request)
+    out = []
+    for slug in sorted(scope):
+        out += accounts.list_users(_slug_to_company(slug))
+    return {"users": [{**_public_user(u), "id": u["id"], "active": u["active"]}
+                      for u in out]}
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(request: Request):
+    scope = _require_admin(request)
+    body = await request.json()
+    slug = (body.get("workspace") or "main").strip()
+    if slug not in scope:
+        raise HTTPException(403, "you can only manage your own workspace")
+    try:
+        user = accounts.create_user(
+            email=body.get("email") or "", name=body.get("name") or "",
+            password=body.get("password") or "",
+            role=body.get("role") or "member",
+            company_slug=_slug_to_company(slug))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "user": {**_public_user(user), "id": user["id"],
+                                 "active": user["active"]}}
+
+
+@app.post("/api/admin/users/{user_id}/password")
+async def admin_set_password(request: Request, user_id: int):
+    scope = _require_admin(request)
+    target = accounts.get_user(user_id)
+    if not target or (target.get("company_slug") or "main") not in scope:
+        raise HTTPException(404, "user not found")
+    body = await request.json()
+    try:
+        accounts.set_password(user_id, body.get("password") or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/admin/users/{user_id}/active")
+async def admin_set_active(request: Request, user_id: int):
+    scope = _require_admin(request)
+    target = accounts.get_user(user_id)
+    if not target or (target.get("company_slug") or "main") not in scope:
+        raise HTTPException(404, "user not found")
+    body = await request.json()
+    me = getattr(request.state, "user", None)
+    if me and me["id"] == user_id and not body.get("active"):
+        raise HTTPException(400, "you can't deactivate your own account")
+    accounts.set_active(user_id, bool(body.get("active")))
+    return {"ok": True}
 
 
 # ---------- auto-refresh scheduler ----------

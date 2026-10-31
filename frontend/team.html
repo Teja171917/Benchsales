@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BenchPilot — Team accounts</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background: #0b1220; color: #e6edf7; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 18px 60px; }
+  a { color: #7db4ff; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { color: #93a4bd; margin: 0 0 22px; font-size: 14px; }
+  .card { background: #111a2e; border: 1px solid #22304d; border-radius: 12px;
+          padding: 18px; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid #1d2a44; }
+  th { color: #93a4bd; font-weight: 600; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #1d2a44; }
+  .badge.admin { background: #2f7cf6; color: #fff; }
+  .off { color: #64748b; }
+  button { padding: 7px 12px; border-radius: 8px; border: 1px solid #2b3c5c;
+           background: #16233c; color: #e6edf7; cursor: pointer; font-size: 13px; }
+  button.primary { background: #2f7cf6; border-color: #2f7cf6; color: #fff; font-weight: 600; }
+  label { display: block; font-size: 13px; color: #b8c6da; margin: 12px 0 5px; }
+  input, select { width: 100%; box-sizing: border-box; padding: 10px 11px; border-radius: 8px;
+          border: 1px solid #2b3c5c; background: #0b1220; color: #e6edf7; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .msg { font-size: 14px; margin-top: 10px; min-height: 18px; }
+  .msg.ok { color: #7ee2a8; } .msg.err { color: #ff9db0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p><a href="/">&larr; Back to BenchPilot</a></p>
+  <h1>Team accounts</h1>
+  <p class="sub">People who can sign in to your workspace. Admins can add and manage accounts; members just use BenchPilot. New accounts can sign in with their password, or with Google using the same email.</p>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Workspace</th><th>Role</th><th>Status</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="6">Loading…</td></tr></tbody>
+    </table>
+    <div class="msg" id="listmsg"></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Add a person</h3>
+    <div class="grid">
+      <div><label>Full name</label><input id="n-name"></div>
+      <div><label>Email</label><input id="n-email" type="email"></div>
+      <div><label>Temporary password (8+ characters)</label><input id="n-pass" type="text"></div>
+      <div><label>Role</label>
+        <select id="n-role"><option value="member">Member</option><option value="admin">Admin</option></select></div>
+    </div>
+    <div id="ws-wrap" style="display:none"><label>Workspace</label><select id="n-ws"></select></div>
+    <p style="margin-top:16px"><button class="primary" id="add">Create account</button></p>
+    <div class="msg" id="addmsg"></div>
+  </div>
+</div>
+<script>
+  var myScope = [];
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function load() {
+    fetch('/api/admin/users').then(function (r) {
+      if (!r.ok) throw new Error('admin access required');
+      return r.json();
+    }).then(function (d) {
+      var tb = document.getElementById('rows');
+      if (!d.users.length) { tb.innerHTML = '<tr><td colspan="6">No accounts yet. Add the first one below.</td></tr>'; return; }
+      tb.innerHTML = d.users.map(function (u) {
+        return '<tr>' +
+          '<td>' + esc(u.name || '—') + '</td><td>' + esc(u.email) + '</td>' +
+          '<td>' + esc(u.workspace) + '</td>' +
+          '<td><span class="badge' + (u.role === 'admin' ? ' admin' : '') + '">' + esc(u.role) + '</span></td>' +
+          '<td>' + (u.active ? 'Active' : '<span class="off">Deactivated</span>') + '</td>' +
+          '<td style="white-space:nowrap">' +
+            '<button data-act="pw" data-id="' + u.id + '">Reset password</button> ' +
+            '<button data-act="toggle" data-id="' + u.id + '" data-on="' + (u.active ? 1 : 0) + '">' +
+              (u.active ? 'Deactivate' : 'Reactivate') + '</button>' +
+          '</td></tr>';
+      }).join('');
+      tb.querySelectorAll('button').forEach(function (b) {
+        b.addEventListener('click', function () { act(b); });
+      });
+    }).catch(function (e) {
+      document.getElementById('listmsg').className = 'msg err';
+      document.getElementById('listmsg').textContent = 'Could not load accounts: ' + e.message;
+    });
+  }
+  function act(b) {
+    var id = b.getAttribute('data-id');
+    if (b.getAttribute('data-act') === 'pw') {
+      var pw = prompt('New password for this account (8+ characters):');
+      if (!pw) return;
+      fetch('/api/admin/users/' + id + '/password', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw }) })
+        .then(function (r) { return r.json().then(function (d) {
+          alert(r.ok ? 'Password updated. Their old sessions were signed out.' : (d.detail || 'Failed.')); }); });
+    } else {
+      var on = b.getAttribute('data-on') === '1';
+      fetch('/api/admin/users/' + id + '/active', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !on }) })
+        .then(function (r) { return r.json().then(function (d) {
+          if (!r.ok) alert(d.detail || 'Failed.'); load(); }); });
+    }
+  }
+  fetch('/api/auth/me').then(function (r) { return r.json(); }).then(function (me) {
+    var sel = document.getElementById('n-ws');
+    var scope = me.admin_scope || [];
+    if (scope.length > 1) document.getElementById('ws-wrap').style.display = 'block';
+    sel.innerHTML = scope.map(function (s) { return '<option value="' + esc(s) + '">' + esc(s) + '</option>'; }).join('');
+  }).catch(function () {});
+  document.getElementById('add').addEventListener('click', function () {
+    var m = document.getElementById('addmsg');
+    var body = { name: document.getElementById('n-name').value,
+                 email: document.getElementById('n-email').value,
+                 password: document.getElementById('n-pass').value,
+                 role: document.getElementById('n-role').value,
+                 workspace: document.getElementById('n-ws').value || 'main' };
+    fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body) }).then(function (r) {
+        return r.json().then(function (d) {
+          if (r.ok) { m.className = 'msg ok'; m.textContent = 'Account created for ' + body.email + '.'; load(); }
+          else { m.className = 'msg err'; m.textContent = d.detail || 'Could not create the account.'; }
+        });
+      }).catch(function () { m.className = 'msg err'; m.textContent = 'Could not reach the server.'; });
+  });
+  load();
+</script>
+</body>
+</html>

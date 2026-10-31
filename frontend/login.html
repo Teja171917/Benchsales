@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BenchPilot — Sign in</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background: #0b1220; color: #e6edf7; display: flex; min-height: 100vh;
+         align-items: center; justify-content: center; }
+  .card { width: min(92vw, 360px); background: #111a2e; border: 1px solid #22304d;
+          border-radius: 14px; padding: 28px 26px; box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 20px; color: #93a4bd; font-size: 14px; }
+  label { display: block; font-size: 13px; color: #b8c6da; margin: 14px 0 6px; }
+  input { width: 100%; box-sizing: border-box; padding: 11px 12px; border-radius: 9px;
+          border: 1px solid #2b3c5c; background: #0b1220; color: #e6edf7; font-size: 15px; }
+  button.main { width: 100%; margin-top: 20px; padding: 12px; border: 0; border-radius: 9px;
+          background: #2f7cf6; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button.google { width: 100%; margin-top: 12px; padding: 11px; border-radius: 9px;
+          background: #fff; color: #1f2937; border: 0; font-size: 15px; font-weight: 600;
+          cursor: pointer; display: none; }
+  .err { background: #3a1620; border: 1px solid #7a2438; color: #ffb4c0;
+         border-radius: 9px; padding: 10px 12px; font-size: 14px; margin-bottom: 6px; display: none; }
+  .divider { text-align: center; color: #64748b; font-size: 12px; margin: 16px 0 2px; display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>BenchPilot</h1>
+  <p class="sub">Sign in with your account.</p>
+  <div class="err" id="err"></div>
+  <form id="f">
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button class="main" type="submit">Sign in</button>
+  </form>
+  <div class="divider" id="ordiv">or</div>
+  <button class="google" id="gbtn" type="button">Sign in with Google</button>
+</div>
+<script>
+  var errBox = document.getElementById('err');
+  function showErr(msg) { errBox.textContent = msg; errBox.style.display = 'block'; }
+  var q = new URLSearchParams(location.search);
+  if (q.get('error') === 'noaccount') showErr('That Google account has no BenchPilot account yet. Ask your admin to add you first.');
+  if (q.get('error') === 'google') showErr('Google sign-in did not complete. Try again, or use your password.');
+  fetch('/api/auth/config').then(function (r) { return r.json(); }).then(function (c) {
+    if (c.google) {
+      document.getElementById('gbtn').style.display = 'block';
+      document.getElementById('ordiv').style.display = 'block';
+    }
+  }).catch(function () {});
+  document.getElementById('gbtn').addEventListener('click', function () {
+    location.href = '/api/auth/google/login';
+  });
+  document.getElementById('f').addEventListener('submit', function (e) {
+    e.preventDefault();
+    fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: document.getElementById('email').value,
+                             password: document.getElementById('password').value })
+    }).then(function (r) {
+      if (r.ok) { location.href = '/'; return; }
+      return r.json().then(function (d) { showErr(d.detail || 'Sign-in failed.'); });
+    }).catch(function () { showErr('Could not reach the server.'); });
+  });
+</script>
+</body>
+</html>

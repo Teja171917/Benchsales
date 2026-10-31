@@ -46,5 +46,39 @@
 <div id="drawer-root"></div>
 <div id="toasts" aria-live="polite"></div>
 <script src="app.js"></script>
+<script>
+(function () {
+  fetch('/api/auth/me').then(function (r) { return r.json(); }).then(function (me) {
+    var bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:9999;background:#111a2e;' +
+      'border:1px solid #22304d;color:#c9d6ea;border-radius:10px;padding:8px 12px;' +
+      'font:13px system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.4)';
+    function link(text, href) {
+      var a = document.createElement('a');
+      a.textContent = text; a.href = href;
+      a.style.cssText = 'color:#7db4ff;text-decoration:none;margin-left:10px';
+      return a;
+    }
+    if (me.user) {
+      bar.appendChild(document.createTextNode(me.user.email));
+      if (me.user.role === 'admin') bar.appendChild(link('Team', '/team.html'));
+      var out = link('Sign out', '#');
+      out.addEventListener('click', function (e) {
+        e.preventDefault();
+        fetch('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/login'; });
+      });
+      bar.appendChild(out);
+    } else if (me.basic_workspace) {
+      bar.appendChild(document.createTextNode(me.workspace_users === 0
+        ? 'Shared login — set up individual accounts'
+        : 'Shared login'));
+      bar.appendChild(link('Team accounts', '/team.html'));
+    } else {
+      return;
+    }
+    document.body.appendChild(bar);
+  }).catch(function () {});
+})();
+</script>
 </body>
 </html>

@@ -130,13 +130,20 @@ def restore(store=None, path=None) -> bool:
         return False
 
 
+def _all_files() -> list:
+    """Every database file worth keeping: the benches plus the central
+    accounts database (user logins must survive a republish too)."""
+    from . import accounts
+    return db.all_paths() + [accounts.ACCOUNTS_PATH]
+
+
 def restore_all(store=None) -> None:
-    for p in db.all_paths():
+    for p in _all_files():
         restore(store, p)
 
 
 def backup_all(store=None, force: bool = False) -> None:
-    for p in db.all_paths():
+    for p in _all_files():
         backup(store, force, p)
 
 
