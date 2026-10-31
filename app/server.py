@@ -144,7 +144,9 @@ def _session_response(user: dict) -> JSONResponse:
 
 @app.get("/login")
 def login_page():
-    return FileResponse(str(FRONTEND_DIR / "login.html"))
+    # no-store: phones were holding the pre-fix page in cache
+    return FileResponse(str(FRONTEND_DIR / "login.html"),
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/auth/config")

@@ -199,6 +199,14 @@ class AccountHttpTests(unittest.TestCase):
                                    "password": "wrong-password"})
         self.assertEqual(r.status_code, 401)
 
+    def test_login_page_is_one_unified_form(self):
+        r = self.client.get("/login")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Email or company username", r.text)
+        self.assertIn("/api/auth/basic-login", r.text)
+        self.assertIn("/api/auth/login", r.text)
+        self.assertEqual(r.headers.get("cache-control"), "no-store")
+
     def test_shared_login_cookie_flow_for_browsers(self):
         # the shared company login signs in through the form endpoint...
         r = self.client.post("/api/auth/basic-login",
