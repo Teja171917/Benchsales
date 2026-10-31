@@ -247,20 +247,25 @@ async def auth_logout(request: Request):
 
 @app.get("/api/auth/me")
 def auth_me(request: Request):
+    scope = _admin_scope(request)
+    pending = sum(accounts.count_pending(_slug_to_company(slug))
+                  for slug in scope)
     user = getattr(request.state, "user", None)
     if user:
         return {"user": _public_user(user), "basic_workspace": None,
                 "workspace_users": accounts.count_users(user.get("company_slug")),
-                "admin_scope": sorted(_admin_scope(request))}
+                "admin_scope": sorted(scope),
+                "pending_approvals": pending}
     basic = getattr(request.state, "basic_target", _NO_BASIC)
     if basic is not _NO_BASIC:
         slug = accounts._slug_for_path(basic)
         return {"user": None, "basic_workspace": slug,
                 "workspace_users": accounts.count_users(
                     None if slug == "main" else slug),
-                "admin_scope": sorted(_admin_scope(request))}
+                "admin_scope": sorted(scope),
+                "pending_approvals": pending}
     return {"user": None, "basic_workspace": None, "workspace_users": 0,
-            "admin_scope": []}
+            "admin_scope": [], "pending_approvals": 0}
 
 
 @app.get("/api/auth/google/login")

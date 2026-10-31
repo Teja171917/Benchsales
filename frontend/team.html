@@ -40,6 +40,15 @@
   <p class="sub">People who can sign in to your workspace. Admins can add and manage accounts; members just use BenchPilot. New accounts can sign in with their password, or with Google using the same email.</p>
   <p class="sub">People can also request an account themselves at <b>/signup</b> using your company ID: <b id="cid" style="color:#e6edf7">…</b> — requests appear below as <b>Pending approval</b> for you to approve or reject.</p>
 
+  <div class="card" id="pending-card" style="display:none; border-color:#f5b942">
+    <h3 style="margin-top:0">⏳ Waiting for your approval</h3>
+    <p class="sub" style="margin-bottom:10px">These people signed up with your company ID. Approve them and they can sign in straight away.</p>
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead>
+      <tbody id="pending-rows"></tbody>
+    </table>
+  </div>
+
   <div class="card">
     <table>
       <thead><tr><th>Name</th><th>Email</th><th>Workspace</th><th>Role</th><th>Status</th><th></th></tr></thead>
@@ -71,9 +80,30 @@
       if (!r.ok) throw new Error('admin access required');
       return r.json();
     }).then(function (d) {
+      var pend = d.users.filter(function (u) { return u.pending; });
+      var card = document.getElementById('pending-card');
+      if (pend.length) {
+        card.style.display = 'block';
+        document.getElementById('pending-rows').innerHTML = pend.map(function (u) {
+          return '<tr><td>' + esc(u.name || '—') + '</td><td>' + esc(u.email) + '</td>' +
+            '<td><select class="rolepick" id="role-' + u.id + '">' +
+              '<option value="member">Member</option><option value="admin">Admin</option></select></td>' +
+            '<td style="white-space:nowrap">' +
+              '<button class="primary" data-act="approve" data-id="' + u.id + '">Approve</button> ' +
+              '<button data-act="remove" data-id="' + u.id + '">Reject</button></td></tr>';
+        }).join('');
+      } else { card.style.display = 'none'; }
+      var rest = d.users.filter(function (u) { return !u.pending; });
       var tb = document.getElementById('rows');
-      if (!d.users.length) { tb.innerHTML = '<tr><td colspan="6">No accounts yet. Add the first one below.</td></tr>'; return; }
-      tb.innerHTML = d.users.map(function (u) {
+      if (!rest.length) {
+        tb.innerHTML = '<tr><td colspan="6">' + (pend.length
+          ? 'No approved accounts yet.'
+          : 'No accounts yet. Add the first one below.') + '</td></tr>';
+        document.querySelectorAll('#pending-rows button').forEach(function (b) {
+          b.addEventListener('click', function () { act(b); }); });
+        return;
+      }
+      tb.innerHTML = rest.map(function (u) {
         var status, actions;
         if (u.pending) {
           status = '<span class="badge pending">Pending approval</span>';
@@ -95,7 +125,7 @@
           '<td>' + status + '</td>' +
           '<td style="white-space:nowrap">' + actions + '</td></tr>';
       }).join('');
-      tb.querySelectorAll('button').forEach(function (b) {
+      document.querySelectorAll('#rows button, #pending-rows button').forEach(function (b) {
         b.addEventListener('click', function () { act(b); });
       });
     }).catch(function (e) {

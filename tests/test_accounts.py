@@ -277,6 +277,21 @@ class AccountHttpTests(unittest.TestCase):
         r = self.client.get("/api/consultants", headers={"Cookie": cookie})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json(), [])   # routed to acme's own (empty) bench
+        # the waiting count surfaces on /api/auth/me for the workspace admin
+        r = self.client.get("/api/auth/me", headers=self._basic("acme", "acme-pw"))
+        self.assertEqual(r.json()["pending_approvals"], 0)
+        self.client.post("/api/auth/signup", json={
+            "name": "Waiting One", "email": "wait@acme.com",
+            "password": "password-1", "company_id": "acme_staffing"})
+        r = self.client.get("/api/auth/me", headers=self._basic("acme", "acme-pw"))
+        self.assertEqual(r.json()["pending_approvals"], 1)
+        r = self.client.get("/api/auth/me", headers=self._basic("x", "main-pw"))
+        self.assertEqual(r.json()["pending_approvals"], 1)   # owner sees all
+        # clean it back up for the reject test below
+        r = self.client.get("/api/admin/users", headers=self._basic("acme", "acme-pw"))
+        w = [u for u in r.json()["users"] if u["email"] == "wait@acme.com"][0]
+        self.client.delete(f"/api/admin/users/{w['id']}",
+                           headers=self._basic("acme", "acme-pw"))
         # a second signup that gets rejected is deleted outright
         self.client.post("/api/auth/signup", json={
             "name": "No Thanks", "email": "no@acme.com",

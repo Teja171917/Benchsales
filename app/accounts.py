@@ -281,6 +281,22 @@ def login_block_reason(email: str, password: str):
     return None
 
 
+def count_pending(company_slug="__all__") -> int:
+    """Signup requests still waiting for an admin's approval."""
+    _ensure()
+    with _conn() as conn:
+        if company_slug == "__all__":
+            return conn.execute(
+                "SELECT COUNT(*) FROM users WHERE pending = 1").fetchone()[0]
+        if company_slug is None:
+            return conn.execute(
+                "SELECT COUNT(*) FROM users WHERE pending = 1"
+                " AND company_slug IS NULL").fetchone()[0]
+        return conn.execute(
+            "SELECT COUNT(*) FROM users WHERE pending = 1"
+            " AND company_slug = ?", (company_slug,)).fetchone()[0]
+
+
 def list_users(company_slug="__all__") -> list:
     _ensure()
     with _conn() as conn:

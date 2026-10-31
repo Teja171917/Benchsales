@@ -59,9 +59,19 @@
       a.style.cssText = 'color:#7db4ff;text-decoration:none;margin-left:10px';
       return a;
     }
+    function teamLink() {
+      var t = link('Team accounts', '/team.html');
+      if (me.pending_approvals > 0) {
+        t.textContent = '⚠ Team accounts — ' + me.pending_approvals + ' waiting for approval';
+        t.style.cssText = 'color:#0b1220;background:#f5b942;text-decoration:none;' +
+          'margin-left:10px;padding:3px 9px;border-radius:999px;font-weight:700';
+        bar.style.borderColor = '#f5b942';
+      }
+      return t;
+    }
     if (me.user) {
       bar.appendChild(document.createTextNode(me.user.email));
-      if (me.user.role === 'admin') bar.appendChild(link('Team', '/team.html'));
+      if (me.user.role === 'admin') bar.appendChild(teamLink());
       var out = link('Sign out', '#');
       out.addEventListener('click', function (e) {
         e.preventDefault();
@@ -72,7 +82,7 @@
       bar.appendChild(document.createTextNode(me.workspace_users === 0
         ? 'Shared login — set up individual accounts'
         : 'Shared login'));
-      bar.appendChild(link('Team accounts', '/team.html'));
+      bar.appendChild(teamLink());
     } else {
       return;
     }
