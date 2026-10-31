@@ -199,6 +199,96 @@ class AccountHttpTests(unittest.TestCase):
                                    "password": "wrong-password"})
         self.assertEqual(r.status_code, 401)
 
+    def test_signup_with_company_id_waits_for_admin_approval(self):
+        # the signup page and the company list are public
+        r = self.client.get("/signup")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Company ID", r.text)
+        ids = [c["id"] for c in self.client.get("/api/auth/companies").json()["companies"]]
+        self.assertIn("acme_staffing", ids)
+        self.assertIn("main", ids)
+        # bad company id, short password, duplicate email all refuse plainly
+        r = self.client.post("/api/auth/signup", json={
+            "name": "New Person", "email": "new@acme.com",
+            "password": "password-1", "company_id": "nope"})
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post("/api/auth/signup", json={
+            "name": "New Person", "email": "new@acme.com",
+            "password": "short", "company_id": "acme_staffing"})
+        self.assertEqual(r.status_code, 400)
+        # a real signup (company name typed loosely still slugifies)
+        r = self.client.post("/api/auth/signup", json={
+            "name": "New Person", "email": "new@acme.com",
+            "password": "password-1", "company_id": "Acme Staffing"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["workspace"], "acme_staffing")
+        r = self.client.post("/api/auth/signup", json={
+            "name": "Dup", "email": "new@acme.com",
+            "password": "password-1", "company_id": "acme_staffing"})
+        self.assertEqual(r.status_code, 400)
+        # pending: correct password still cannot sign in, and says why
+        r = self.client.post("/api/auth/login", json={
+            "email": "new@acme.com", "password": "password-1"})
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("waiting for approval", r.json()["detail"])
+        # a session admin of acme cannot see or approve a MAIN signup
+        self.client.post("/api/auth/signup", json={
+            "name": "Main Person", "email": "boss@main.com",
+            "password": "password-1", "company_id": "main"})
+        self.client.post("/api/admin/users", headers=self._basic("acme", "acme-pw"), json={
+            "email": "admin@acme.com", "name": "Acme Admin",
+            "password": "password-1", "role": "admin",
+            "workspace": "acme_staffing"})
+        r = self.client.post("/api/auth/login", json={
+            "email": "admin@acme.com", "password": "password-1"})
+        acme_cookie = r.headers.get("set-cookie", "").split(";")[0]
+        r = self.client.get("/api/admin/users",
+                            headers={"Cookie": acme_cookie})
+        self.assertNotIn("boss@main.com", r.text)
+        r = self.client.get("/api/admin/users", headers=self._basic("x", "main-pw"))
+        boss = [u for u in r.json()["users"]
+                if u["email"] == "boss@main.com"][0]
+        r = self.client.post(f"/api/admin/users/{boss['id']}/approve",
+                             headers={"Cookie": acme_cookie},
+                             json={"role": "member"})
+        self.assertEqual(r.status_code, 404)
+        # ...but the main login (all-workspace scope) approves it fine
+        r = self.client.post(f"/api/admin/users/{boss['id']}/approve",
+                             headers=self._basic("x", "main-pw"), json={"role": "admin"})
+        self.assertEqual(r.status_code, 200, r.text)
+        r = self.client.post("/api/auth/login", json={
+            "email": "boss@main.com", "password": "password-1"})
+        self.assertEqual(r.status_code, 200, r.text)
+        # acme's admin sees it pending, approves it as a member...
+        r = self.client.get("/api/admin/users", headers=self._basic("acme", "acme-pw"))
+        pend = [u for u in r.json()["users"] if u["email"] == "new@acme.com"]
+        self.assertEqual(len(pend), 1)
+        self.assertTrue(pend[0]["pending"])
+        r = self.client.post(f"/api/admin/users/{pend[0]['id']}/approve",
+                             headers=self._basic("acme", "acme-pw"), json={"role": "member"})
+        self.assertEqual(r.status_code, 200, r.text)
+        # ...and now the person signs in and sees only acme's bench
+        r = self.client.post("/api/auth/login", json={
+            "email": "new@acme.com", "password": "password-1"})
+        self.assertEqual(r.status_code, 200, r.text)
+        cookie = r.headers.get("set-cookie", "").split(";")[0]
+        r = self.client.get("/api/auth/me", headers={"Cookie": cookie})
+        self.assertEqual(r.json()["user"]["workspace"], "acme_staffing")
+        r = self.client.get("/api/consultants", headers={"Cookie": cookie})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), [])   # routed to acme's own (empty) bench
+        # a second signup that gets rejected is deleted outright
+        self.client.post("/api/auth/signup", json={
+            "name": "No Thanks", "email": "no@acme.com",
+            "password": "password-1", "company_id": "acme_staffing"})
+        r = self.client.get("/api/admin/users", headers=self._basic("acme", "acme-pw"))
+        rej = [u for u in r.json()["users"] if u["email"] == "no@acme.com"][0]
+        r = self.client.delete(f"/api/admin/users/{rej['id']}", headers=self._basic("acme", "acme-pw"))
+        self.assertEqual(r.status_code, 200)
+        r = self.client.post("/api/auth/login", json={
+            "email": "no@acme.com", "password": "password-1"})
+        self.assertEqual(r.status_code, 401)
+
     def test_login_page_is_one_unified_form(self):
         r = self.client.get("/login")
         self.assertEqual(r.status_code, 200)

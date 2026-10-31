@@ -19,6 +19,8 @@
   th { color: #93a4bd; font-weight: 600; }
   .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #1d2a44; }
   .badge.admin { background: #2f7cf6; color: #fff; }
+  .badge.pending { background: #8a6d1f; color: #ffe9a8; }
+  select.rolepick { width: auto; display: inline-block; padding: 5px 7px; font-size: 13px; }
   .off { color: #64748b; }
   button { padding: 7px 12px; border-radius: 8px; border: 1px solid #2b3c5c;
            background: #16233c; color: #e6edf7; cursor: pointer; font-size: 13px; }
@@ -36,6 +38,7 @@
   <p><a href="/">&larr; Back to BenchPilot</a></p>
   <h1>Team accounts</h1>
   <p class="sub">People who can sign in to your workspace. Admins can add and manage accounts; members just use BenchPilot. New accounts can sign in with their password, or with Google using the same email.</p>
+  <p class="sub">People can also request an account themselves at <b>/signup</b> using your company ID: <b id="cid" style="color:#e6edf7">…</b> — requests appear below as <b>Pending approval</b> for you to approve or reject.</p>
 
   <div class="card">
     <table>
@@ -71,16 +74,26 @@
       var tb = document.getElementById('rows');
       if (!d.users.length) { tb.innerHTML = '<tr><td colspan="6">No accounts yet. Add the first one below.</td></tr>'; return; }
       tb.innerHTML = d.users.map(function (u) {
+        var status, actions;
+        if (u.pending) {
+          status = '<span class="badge pending">Pending approval</span>';
+          actions = '<select class="rolepick" id="role-' + u.id + '">' +
+              '<option value="member">Member</option><option value="admin">Admin</option></select> ' +
+            '<button class="primary" data-act="approve" data-id="' + u.id + '">Approve</button> ' +
+            '<button data-act="remove" data-id="' + u.id + '">Reject</button>';
+        } else {
+          status = u.active ? 'Active' : '<span class="off">Deactivated</span>';
+          actions = '<button data-act="pw" data-id="' + u.id + '">Reset password</button> ' +
+            '<button data-act="toggle" data-id="' + u.id + '" data-on="' + (u.active ? 1 : 0) + '">' +
+              (u.active ? 'Deactivate' : 'Reactivate') + '</button> ' +
+            '<button data-act="remove" data-id="' + u.id + '">Remove</button>';
+        }
         return '<tr>' +
           '<td>' + esc(u.name || '—') + '</td><td>' + esc(u.email) + '</td>' +
           '<td>' + esc(u.workspace) + '</td>' +
           '<td><span class="badge' + (u.role === 'admin' ? ' admin' : '') + '">' + esc(u.role) + '</span></td>' +
-          '<td>' + (u.active ? 'Active' : '<span class="off">Deactivated</span>') + '</td>' +
-          '<td style="white-space:nowrap">' +
-            '<button data-act="pw" data-id="' + u.id + '">Reset password</button> ' +
-            '<button data-act="toggle" data-id="' + u.id + '" data-on="' + (u.active ? 1 : 0) + '">' +
-              (u.active ? 'Deactivate' : 'Reactivate') + '</button>' +
-          '</td></tr>';
+          '<td>' + status + '</td>' +
+          '<td style="white-space:nowrap">' + actions + '</td></tr>';
       }).join('');
       tb.querySelectorAll('button').forEach(function (b) {
         b.addEventListener('click', function () { act(b); });
@@ -92,7 +105,24 @@
   }
   function act(b) {
     var id = b.getAttribute('data-id');
-    if (b.getAttribute('data-act') === 'pw') {
+    var kind = b.getAttribute('data-act');
+    if (kind === 'approve') {
+      var role = (document.getElementById('role-' + id) || {}).value || 'member';
+      fetch('/api/admin/users/' + id + '/approve', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: role }) })
+        .then(function (r) { return r.json().then(function (d) {
+          if (!r.ok) alert(d.detail || 'Failed.'); load(); }); });
+      return;
+    }
+    if (kind === 'remove') {
+      if (!confirm('Remove this account? This cannot be undone.')) return;
+      fetch('/api/admin/users/' + id, { method: 'DELETE' })
+        .then(function (r) { return r.json().then(function (d) {
+          if (!r.ok) alert(d.detail || 'Failed.'); load(); }); });
+      return;
+    }
+    if (kind === 'pw') {
       var pw = prompt('New password for this account (8+ characters):');
       if (!pw) return;
       fetch('/api/admin/users/' + id + '/password', { method: 'POST',
@@ -110,6 +140,8 @@
     }
   }
   fetch('/api/auth/me').then(function (r) { return r.json(); }).then(function (me) {
+    var mine = (me.user && me.user.workspace) || me.basic_workspace || '';
+    if (mine) document.getElementById('cid').textContent = mine;
     var sel = document.getElementById('n-ws');
     var scope = me.admin_scope || [];
     if (scope.length > 1) document.getElementById('ws-wrap').style.display = 'block';

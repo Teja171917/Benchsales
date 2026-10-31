@@ -33,8 +33,9 @@ app = FastAPI(title="BenchPilot", version="1.0")
 _ready = set()   # company databases already prepared since start-up
 
 
-PUBLIC_PATHS = {"/login", "/api/auth/login", "/api/auth/basic-login",
-                "/api/auth/config",
+PUBLIC_PATHS = {"/login", "/signup", "/api/auth/login",
+                "/api/auth/basic-login", "/api/auth/signup",
+                "/api/auth/companies", "/api/auth/config",
                 "/api/auth/google/login", "/api/auth/google/callback",
                 "/favicon.ico"}
 SESSION_COOKIE = "bp_session"
@@ -154,6 +155,41 @@ def auth_config():
     return {"google": accounts.google_configured()}
 
 
+@app.get("/signup")
+def signup_page():
+    return FileResponse(str(FRONTEND_DIR / "signup.html"),
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/auth/companies")
+def auth_companies():
+    """Company IDs a signup can pick: 'main' plus one per company."""
+    out = [{"id": "main", "name": "BenchPilot (main bench)"}]
+    for c in db.companies():
+        out.append({"id": accounts.slugify(c["name"]), "name": c["name"]})
+    return {"companies": out}
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(request: Request):
+    """Self-service signup with a company ID. The account is created
+    pending; that workspace's admin approves it on the Team page."""
+    body = await request.json()
+    key = "signup:" + (body.get("email") or "").strip().lower()
+    if _login_rate_limited(key):
+        raise HTTPException(429, "too many attempts — wait a few minutes")
+    _login_fails.setdefault(key, []).append(time.time())
+    try:
+        user = accounts.request_signup(
+            email=body.get("email") or "", name=body.get("name") or "",
+            password=body.get("password") or "",
+            company_id=body.get("company_id") or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "pending": True,
+            "workspace": user.get("company_slug") or "main"}
+
+
 @app.post("/api/auth/login")
 async def auth_login(request: Request):
     body = await request.json()
@@ -162,6 +198,14 @@ async def auth_login(request: Request):
         raise HTTPException(429, "too many attempts — wait a few minutes")
     user = accounts.authenticate(email, body.get("password") or "")
     if not user:
+        reason = accounts.login_block_reason(email, body.get("password") or "")
+        if reason == "pending":
+            raise HTTPException(
+                403, "your account is waiting for approval — "
+                     "your company admin approves new signups")
+        if reason == "inactive":
+            raise HTTPException(
+                403, "this account has been deactivated — ask your admin")
         _login_fails.setdefault(email, []).append(time.time())
         raise HTTPException(401, "email or password is not right")
     if accounts.target_path_for(user) is False:
@@ -301,7 +345,8 @@ def admin_list_users(request: Request):
     out = []
     for slug in sorted(scope):
         out += accounts.list_users(_slug_to_company(slug))
-    return {"users": [{**_public_user(u), "id": u["id"], "active": u["active"]}
+    return {"users": [{**_public_user(u), "id": u["id"], "active": u["active"],
+                       "pending": u["pending"]}
                       for u in out]}
 
 
@@ -349,6 +394,37 @@ async def admin_set_active(request: Request, user_id: int):
     if me and me["id"] == user_id and not body.get("active"):
         raise HTTPException(400, "you can't deactivate your own account")
     accounts.set_active(user_id, bool(body.get("active")))
+    return {"ok": True}
+
+
+@app.post("/api/admin/users/{user_id}/approve")
+async def admin_approve_user(request: Request, user_id: int):
+    """Approve a pending signup in the caller's workspace scope."""
+    scope = _require_admin(request)
+    target = accounts.get_user(user_id)
+    if not target or (target.get("company_slug") or "main") not in scope:
+        raise HTTPException(404, "user not found")
+    body = await request.json()
+    try:
+        user = accounts.approve_user(user_id, body.get("role") or "member")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "user": {**_public_user(user), "id": user["id"],
+                                 "active": user["active"],
+                                 "pending": user["pending"]}}
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_delete_user(request: Request, user_id: int):
+    """Reject a pending signup, or remove an account, in scope."""
+    scope = _require_admin(request)
+    target = accounts.get_user(user_id)
+    if not target or (target.get("company_slug") or "main") not in scope:
+        raise HTTPException(404, "user not found")
+    me = getattr(request.state, "user", None)
+    if me and me["id"] == user_id:
+        raise HTTPException(400, "you can't remove your own account")
+    accounts.delete_user(user_id)
     return {"ok": True}
 
 

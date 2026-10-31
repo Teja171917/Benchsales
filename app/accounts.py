@@ -74,6 +74,13 @@ def init_accounts() -> None:
                 key TEXT PRIMARY KEY,
                 value TEXT
             )""")
+        # Self-signup requests land as pending users (inactive until a
+        # workspace admin approves them); older databases gain the flag.
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
+        if "pending" not in cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN pending"
+                " INTEGER NOT NULL DEFAULT 0")
     _ready = True
 
 
@@ -144,7 +151,10 @@ def verify_password(password: str, stored: str) -> bool:
 def _row_user(row) -> dict:
     return {"id": row["id"], "email": row["email"], "name": row["name"],
             "role": row["role"], "company_slug": row["company_slug"],
-            "active": bool(row["active"]), "created_at": row["created_at"]}
+            "active": bool(row["active"]),
+            "pending": bool(row["pending"]) if "pending" in row.keys()
+            else False,
+            "created_at": row["created_at"]}
 
 
 def any_users() -> bool:
@@ -182,8 +192,9 @@ def get_user(user_id: int):
 
 
 def create_user(email: str, name: str, password: str, role: str = "member",
-                company_slug: str = None) -> dict:
-    """Create one user. Raises ValueError with a plain message on bad input."""
+                company_slug: str = None, pending: bool = False) -> dict:
+    """Create one user. Raises ValueError with a plain message on bad input.
+    A pending user is stored inactive until a workspace admin approves."""
     _ensure()
     email = (email or "").strip().lower()
     if not _EMAIL_RE.match(email):
@@ -201,12 +212,73 @@ def create_user(email: str, name: str, password: str, role: str = "member",
     with _conn() as conn:
         cur = conn.execute(
             "INSERT INTO users (email, name, password_hash, role,"
-            " company_slug, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)",
+            " company_slug, active, pending, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (email, (name or "").strip(),
              hash_password(password) if password else "",
-             role, company_slug, time.time()))
+             role, company_slug, 0 if pending else 1,
+             1 if pending else 0, time.time()))
         user_id = cur.lastrowid
     return get_user(user_id)
+
+
+def request_signup(email: str, name: str, password: str,
+                   company_id: str) -> dict:
+    """Self-service signup: the person picks their company by ID and the
+    account waits, inactive, for that workspace's admin to approve it."""
+    if not (name or "").strip():
+        raise ValueError("enter your name")
+    if not password:
+        raise ValueError("set a password (8+ characters)")
+    slug = slugify(company_id or "")
+    if not slug or slug not in workspace_slugs():
+        raise ValueError("that company ID is not recognised — "
+                         "check it with your admin")
+    return create_user(email=email, name=name, password=password,
+                       role="member",
+                       company_slug=None if slug == "main" else slug,
+                       pending=True)
+
+
+def approve_user(user_id: int, role: str = "member") -> dict:
+    if role not in ("admin", "member"):
+        raise ValueError("role must be admin or member")
+    _ensure()
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE users SET active = 1, pending = 0, role = ?"
+            " WHERE id = ?", (role, user_id))
+    return get_user(user_id)
+
+
+def delete_user(user_id: int) -> None:
+    _ensure()
+    with _conn() as conn:
+        conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
+def login_block_reason(email: str, password: str):
+    """Why a correct-password sign-in is still refused: 'pending' while
+    the account awaits admin approval, 'inactive' after deactivation,
+    else None. Only answers when the password actually matches, so a
+    wrong guess learns nothing about the account."""
+    user = get_user_by_email(email)
+    if not user:
+        return None
+    _ensure()
+    with _conn() as conn:
+        row = conn.execute("SELECT password_hash FROM users WHERE id = ?",
+                           (user["id"],)).fetchone()
+    if not row or not row["password_hash"]:
+        return None
+    if not verify_password(password, row["password_hash"]):
+        return None
+    if user["pending"]:
+        return "pending"
+    if not user["active"]:
+        return "inactive"
+    return None
 
 
 def list_users(company_slug="__all__") -> list:
