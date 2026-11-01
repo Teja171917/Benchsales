@@ -981,6 +981,12 @@ def api_collect_kick():
 
 
 # ---------- jobs ----------
+@app.get("/api/jobs/cities")
+def api_job_cities():
+    """All cities in the job pool with counts, for the Matches filter."""
+    return db.job_cities()
+
+
 @app.get("/api/jobs")
 def api_list_jobs(source: str = "", q: str = "", limit: int = 50,
                   emp: str = "", include_unspecified: bool = False):

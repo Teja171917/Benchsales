@@ -586,6 +586,13 @@ async function loadJobs() {
   if (!el) return;
   el.innerHTML = skelRows(8);
   jobsCache = await api("/api/jobs?limit=1000");
+  const marketCities = await api("/api/jobs/cities").catch(() => []);
+  const citySel0 = $("#mt-city");
+  if (citySel0) {
+    if (matchFilter.city && !marketCities.some((c) => c.city === matchFilter.city)) matchFilter.city = "";
+    citySel0.innerHTML = `<option value="">All cities</option>` +
+      marketCities.map((c) => `<option value="${esc(c.city)}"${matchFilter.city === c.city ? " selected" : ""}>${esc(c.city)} (${c.jobs})</option>`).join("");
+  }
   const srcs = await api("/api/sources/status");
   $("#j-source").innerHTML = `<option value="">All sources</option>` +
     srcs.filter((s) => s.name !== "urlimport")
@@ -674,7 +681,8 @@ async function runCollection() {
 let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best",
   emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: ""};
 function cityOf(m) {
-  const loc = (m.location || "").trim();
+  let loc = (m.location || "").trim();
+  if (/^remote\s*-\s*/i.test(loc)) loc = loc.replace(/^remote\s*-\s*/i, "");
   return loc ? loc.split(",")[0].trim() : "";
 }
 function workTypeOf(m) {
@@ -702,6 +710,7 @@ async function renderMatches() {
       <div><label class="flabel" for="mt-sort">Sort by</label>
         <select id="mt-sort">
           <option value="best"${matchFilter.sort === "best" ? " selected" : ""}>Best score first</option>
+          <option value="new"${matchFilter.sort === "new" ? " selected" : ""}>Latest post first</option>
           <option value="low"${matchFilter.sort === "low" ? " selected" : ""}>Lowest score first</option>
         </select></div>
       <div><label class="flabel" for="mt-city">City</label>
@@ -734,8 +743,9 @@ async function renderMatches() {
     matchFilter.unspec = $("#mt-unspec").checked;
     loadMatches();
   };
-  // city + work type filter instantly, without the Apply button
+  // city, sort and work type filter instantly, without the Apply button
   $("#mt-city").onchange = () => { matchFilter.city = $("#mt-city").value; loadMatches(); };
+  $("#mt-sort").onchange = () => { matchFilter.sort = $("#mt-sort").value; loadMatches(); };
   $$("input[name='mt-work']").forEach((r) => { r.onchange = () => {
     matchFilter.work = r.value; loadMatches(); }; });
   loadMatches();
@@ -749,24 +759,14 @@ async function loadMatches() {
   if (matchFilter.consultant_id) mq.set("consultant_id", matchFilter.consultant_id);
   let ms = await api(`/api/matches?${mq}`);
   if (matchFilter.source) ms = ms.filter((m) => m.source === matchFilter.source);
-  // the city list reflects the current consultant/score/source selection
-  const citySel = $("#mt-city");
-  if (citySel) {
-    // scope words ("Remote", "US", "Anywhere") are not cities — the
-    // Work type buttons already cover them
-    const NOT_CITY = new Set(["remote", "anywhere", "us", "usa",
-      "united states", "nationwide"]);
-    const cities = [...new Set(ms.map(cityOf).filter(
-      (c) => c && !NOT_CITY.has(c.toLowerCase())))].sort();
-    if (matchFilter.city && !cities.includes(matchFilter.city)) matchFilter.city = "";
-    citySel.innerHTML = `<option value="">All cities</option>` +
-      cities.map((c) => `<option value="${esc(c)}"${matchFilter.city === c ? " selected" : ""}>${esc(c)}</option>`).join("");
-  }
   const total = ms.length;
   ms = ms.filter((m) => empPasses(m.emp_tags, matchFilter.emp, matchFilter.unspec));
   if (matchFilter.city) ms = ms.filter((m) => cityOf(m) === matchFilter.city);
   if (matchFilter.work) ms = ms.filter((m) => workTypeOf(m) === matchFilter.work);
-  ms.sort((a, b) => matchFilter.sort === "low" ? a.score - b.score : b.score - a.score);
+  const postedTs = (m) => { const t = Date.parse(m.posted_at || ""); return isNaN(t) ? 0 : t; };
+  if (matchFilter.sort === "low") ms.sort((a, b) => a.score - b.score);
+  else if (matchFilter.sort === "new") ms.sort((a, b) => (postedTs(b) - postedTs(a)) || (b.score - a.score));
+  else ms.sort((a, b) => (b.score - a.score) || (postedTs(b) - postedTs(a)));
   const cnt = $("#mt-count");
   if (cnt) cnt.textContent = ms.length === total ? `${ms.length} matches`
     : `Showing ${ms.length} of ${total} matches`;

@@ -1025,3 +1025,47 @@ def skill_gaps(cid: int, limit: int = 12) -> dict:
             for s, n in sorted(counts.items(), key=lambda kv: -kv[1])]
     return {"consultant_id": cid, "matches_considered": len(rows),
             "gaps": gaps[:limit], "gap_count": len(gaps)}
+
+
+# scope words are never cities; a bare state name is not a city either
+# (but "New York, NY" is — the city, told apart by the comma + state part)
+_NOT_CITIES = {
+    "remote", "anywhere", "us", "usa", "united states", "nationwide",
+    "multiple locations", "various",
+}
+_NOT_CITY_STATES = {"texas", "california", "new york",
+    "florida", "illinois", "virginia", "colorado", "arizona", "georgia",
+    "washington", "ohio", "michigan", "pennsylvania", "massachusetts",
+    "north carolina", "new jersey", "oregon", "nevada", "utah",
+    "minnesota", "missouri", "maryland", "wisconsin", "tennessee",
+    "indiana", "alabama", "louisiana", "kentucky", "oklahoma",
+    "connecticut", "iowa", "arkansas", "kansas", "mississippi",
+    "nebraska", "idaho", "new mexico", "hawaii", "maine", "vermont",
+    "rhode island", "delaware", "montana", "wyoming", "north dakota",
+    "south dakota", "alaska", "west virginia", "south carolina",
+    "new hampshire",
+}
+
+
+def job_cities() -> list:
+    """Every US city in the job pool, with its live job count — the
+    Matches city filter is built from this, so the team sees the whole
+    market, not just the cities in the current match selection.
+    Sorted by job count (busiest first), then A-Z."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT location FROM jobs").fetchall()
+    counts: dict = {}
+    for r in rows:
+        loc = (r["location"] or "").strip()
+        if not loc:
+            continue
+        city = loc.split(",")[0].strip()
+        if city.lower().startswith("remote - "):
+            city = city[len("Remote - "):].strip()
+        if not city or city.lower() in _NOT_CITIES:
+            continue
+        if "," not in loc and city.lower() in _NOT_CITY_STATES:
+            continue     # the whole location is just a state name
+        counts[city] = counts.get(city, 0) + 1
+    return [{"city": c, "jobs": n} for c, n in
+            sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
