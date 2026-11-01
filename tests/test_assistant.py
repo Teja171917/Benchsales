@@ -126,3 +126,61 @@ class AssistantHttpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AssistantActionTests(unittest.TestCase):
+    """Chat actions: 'tailor <name>'s resume' runs the tailor for real,
+    'queue it' queues that match — flagged skills are reported, never
+    silently added."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "t.db"
+        db.init_db()
+        c = db.create_consultant({"name": "Pat Dev", "email": "pat@x.io"})
+        db.upsert_resume(c["id"], "pat.docx",
+                         "Pat Dev\nJava Spring Boot developer", ["java", "spring"])
+        self.cid = c["id"]
+        jid = db.insert_job({
+            "source": "t", "source_id": "s1", "title": "Java Dev",
+            "company": "Acme", "location": "Houston, TX", "remote_flag": 0,
+            "url": "", "description": "Java Spring Boot role",
+            "posted_at": "", "salary": "", "employment_type": ""})
+        with db.get_conn() as conn:
+            conn.execute(
+                'INSERT INTO "matches"(consultant_id, job_id, score, '
+                'score_breakdown_json, missing_skills_json, created_at) '
+                "VALUES (?, ?, 88.0, '{}', '[]', '2026-11-01T00:00:00Z')",
+                (self.cid, jid))
+        self._orig = assistant._run_tailor
+        assistant._run_tailor = lambda m: {
+            "id": db.insert_tailored(m["id"], "TAILORED TEXT", "template",
+                                     ["Kubernetes"]),
+            "tailored_by": "template", "added_skills_flagged": ["Kubernetes"]}
+
+    def tearDown(self):
+        assistant._run_tailor = self._orig
+        db.DB_PATH = self._old
+        self.tmp.cleanup()
+
+    def test_tailor_then_queue_it(self):
+        out = assistant.chat("Please tailor Pat's resume", actor="sam@x.io")
+        self.assertEqual(out["action"]["type"], "tailored")
+        self.assertIn("Kubernetes", out["reply"])       # flagged, surfaced
+        self.assertIn("NOT added", out["reply"])
+        out = assistant.chat("queue it", actor="sam@x.io")
+        self.assertEqual(out["action"]["type"], "queued")
+        apps = db.list_applications()
+        self.assertEqual(len(apps), 1)
+        self.assertEqual(apps[0]["status"], "queued")
+        self.assertIsNotNone(apps[0]["tailored_resume_id"])
+
+    def test_tailor_without_a_name_asks(self):
+        out = assistant.chat("fix the resume to the max", actor="sam@x.io")
+        self.assertIsNone(out["action"])
+        self.assertIn("Pat Dev", out["reply"])
+
+    def test_queue_it_without_tailor_falls_through(self):
+        out = assistant.chat("queue it", actor="other@x.io")
+        self.assertIsNone(out["action"])   # no pending action: normal chat

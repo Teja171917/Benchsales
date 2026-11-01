@@ -147,6 +147,14 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS cover_letters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL UNIQUE,
+    text TEXT NOT NULL,
+    made_by TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (match_id) REFERENCES "matches"(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     author TEXT DEFAULT '',
@@ -735,6 +743,35 @@ def list_matches(consultant_id: int | None = None,
         r["missing_skills"] = json.loads(r.pop("missing_skills_json") or "[]")
         _with_tags(r)
     return rows
+
+
+def get_tailored_for_match(match_id: int) -> dict | None:
+    """The newest tailored resume for a match, if one exists."""
+    with get_conn() as conn:
+        r = conn.execute(
+            "SELECT * FROM tailored_resumes WHERE match_id=? "
+            "ORDER BY id DESC LIMIT 1", (match_id,)).fetchone()
+        return dict(r) if r else None
+
+
+def save_cover_letter(match_id: int, text: str, made_by: str) -> dict:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO cover_letters(match_id, text, made_by, created_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(match_id) DO UPDATE SET text=excluded.text, "
+            "made_by=excluded.made_by, created_at=excluded.created_at",
+            (match_id, text, made_by, now_iso()))
+        r = conn.execute("SELECT * FROM cover_letters WHERE match_id=?",
+                         (match_id,)).fetchone()
+    return dict(r)
+
+
+def get_cover_letter(match_id: int) -> dict | None:
+    with get_conn() as conn:
+        r = conn.execute("SELECT * FROM cover_letters WHERE match_id=?",
+                         (match_id,)).fetchone()
+        return dict(r) if r else None
 
 
 def create_feedback(author: str, category: str, text: str) -> dict:

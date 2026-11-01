@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import accounts, autolearn, contact as contact_mod, db, emptype, market, portals, usa
 from app import assistant as assistant_mod
+from app import coverletter as coverletter_mod
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
@@ -1240,8 +1241,38 @@ async def api_assistant_chat(request: Request):
     """In-app assistant: answers from the caller's own workspace data.
     Read-only — it never changes data or submits anything."""
     body = await request.json()
+    user = accounts.resolve_session(request.cookies.get(SESSION_COOKIE, ""))
+    actor = user["email"] if user else "shared"
     return assistant_mod.chat(str(body.get("message") or ""),
-                              body.get("history") or [])
+                              body.get("history") or [], actor)
+
+
+@app.post("/api/matches/{mid}/cover-letter")
+def api_create_cover_letter(mid: int):
+    """Generate (or regenerate) the cover letter for a match — the piece
+    full-time applications expect alongside the resume. Facts only, from
+    the resume and the posting."""
+    m = db.get_match(mid)
+    if not m:
+        raise HTTPException(404, "match not found")
+    consultant = db.get_consultant(m["consultant_id"])
+    tailored = db.get_tailored_for_match(mid)
+    resume = db.get_resume(m["consultant_id"])
+    base_text = (tailored or {}).get("tailored_text") or \
+        (resume or {}).get("raw_text") or ""
+    job = {"title": m.get("job_title"), "company": m.get("company"),
+           "description": m.get("job_description") or ""}
+    text, made_by = coverletter_mod.generate(
+        consultant or {}, job, base_text, db.get_settings())
+    return db.save_cover_letter(mid, text, made_by)
+
+
+@app.get("/api/matches/{mid}/cover-letter")
+def api_get_cover_letter(mid: int):
+    cl = db.get_cover_letter(mid)
+    if not cl:
+        raise HTTPException(404, "no cover letter yet")
+    return cl
 
 
 @app.get("/api/matches/summary")

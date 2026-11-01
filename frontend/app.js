@@ -830,14 +830,42 @@ async function tailorModal(mid) {
       <div class="row" style="margin-top:12px">
         <button class="btn primary" id="tw-queue">Save &amp; queue for apply</button>
         <button class="btn" id="tw-dl">Download tailored (.txt)</button>
+        <button class="btn" id="tw-cl">Cover letter</button>
         <button class="btn" id="tw-close">Close</button>
-      </div>`, true);
+      </div>
+      <div id="tw-cl-box"></div>`, true);
     $("#tw-close").onclick = closeModal;
     $("#tw-dl").onclick = () => {
       const a = document.createElement("a");
       a.href = "data:text/plain;charset=utf-8," + encodeURIComponent(full.tailored_text || "");
       a.download = "tailored-resume.txt";
       a.click();
+    };
+    $("#tw-cl").onclick = async () => {
+      const box = $("#tw-cl-box");
+      box.innerHTML = `<div class="muted" style="margin-top:12px">Writing the cover letter…</div>`;
+      try {
+        const cl = await api(`/api/matches/${mid}/cover-letter`, {method: "POST"});
+        box.innerHTML = `
+          <h3 style="margin:14px 0 6px">Cover letter <span class="muted">(${cl.made_by === "llm" ? "written by AI" : "template — no AI key working in this workspace"})</span></h3>
+          <pre class="doc">${esc(cl.text)}</pre>
+          <div class="row" style="margin-top:8px">
+            <button class="btn" id="tw-cl-copy">Copy letter</button>
+            <button class="btn" id="tw-cl-dl">Download letter (.txt)</button>
+          </div>`;
+        $("#tw-cl-copy").onclick = async () => {
+          try { await navigator.clipboard.writeText(cl.text); toast("Cover letter copied", "ok"); }
+          catch (e) { toast("Copy failed — select the letter text manually", "err"); }
+        };
+        $("#tw-cl-dl").onclick = () => {
+          const a = document.createElement("a");
+          a.href = "data:text/plain;charset=utf-8," + encodeURIComponent(cl.text);
+          a.download = "cover-letter.txt";
+          a.click();
+        };
+      } catch (e) {
+        box.innerHTML = `<div class="errbox" style="margin-top:12px">${esc(e.message)}</div>`;
+      }
     };
     const addBtn = $("#tw-add");
     if (addBtn) addBtn.onclick = async () => {

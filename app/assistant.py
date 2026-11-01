@@ -11,9 +11,12 @@ caller's own workspace database — the server routes each request to that
 workspace before this module runs, so one company never sees another's
 bench.
 """
+import re
+
 import requests
 
 from . import db
+from . import tailor as tailor_mod
 
 SYSTEM = """You are the BenchPilot assistant, helping a bench sales /
 recruiting team inside their own BenchPilot workspace.
@@ -24,9 +27,12 @@ Rules:
   where the person can check (Overview, Consultants, Jobs, Matches,
   Apply Queue, Agent Office, Settings).
 - Never invent numbers, names, companies, salaries, or jobs.
-- You are read-only: you cannot queue, apply, send email, or change
-  anything. When someone asks you to do something, give the exact steps
-  to do it in the app instead.
+- Two actions run through the app itself when a request names them:
+  tailoring a resume and queueing a tailored match. If such a request
+  reaches you, it means a detail was missing (usually whose resume) —
+  ask for it. You never submit applications to employers, send email,
+  or change settings; for anything else, give the exact steps in the
+  app instead.
 - Keep answers short and plain — a few sentences or a short list. Use
   the names and numbers from the data exactly as written.
 - This workspace's data is private to this company. Never mention other
@@ -57,6 +63,12 @@ APP_GUIDE = """APP GUIDE:
   need a person to send or approve.
 - Job collection runs automatically on the interval set in Settings;
   jobs are collected once and scored against every consultant.
+- Actions you can trigger by asking here: "tailor <name>'s resume" (or
+  "fix the resume for <job>") tailors that consultant's resume for
+  their best matching job; then "queue it" adds it to the Apply Queue
+  with the tailored resume attached. Skills flagged as not in the
+  original resume are never added without a person confirming them in
+  the Tailor screen.
 """
 
 
@@ -138,17 +150,115 @@ _NO_AI = ("I can help with this workspace's consultants, matches and "
           "the team's apply list.")
 
 
-def chat(message: str, history: list | None = None) -> dict:
-    """Answer one message. Returns {"reply": str, "ai": bool}."""
+# ---------------- actions (deterministic, no model involved) ----------------
+
+_last_action: dict = {}   # (db path, actor) -> {match_id, tailored_id, ...}
+
+_TAILOR_WORDS = re.compile(
+    r"\b(tailor|fix|improve|update|rewrite|maximi[sz]e|polish)\b", re.I)
+_QUEUE_WORDS = re.compile(r"\bqueue\b", re.I)
+
+
+def _run_tailor(match: dict) -> dict:
+    """The same tailor run the Tailor screen performs."""
+    result = tailor_mod.tailor_match(match, db.get_settings())
+    tid = db.insert_tailored(match["id"], result["text"],
+                             result["tailored_by"],
+                             result["added_skills_flagged"])
+    return {"id": tid, "tailored_by": result["tailored_by"],
+            "added_skills_flagged": result["added_skills_flagged"]}
+
+
+def _find_consultant(text: str, consultants: list) -> dict | None:
+    low = text.lower()
+    for c in consultants:
+        name = (c.get("name") or "").lower()
+        if name and (name in low or name.split()[0] in low):
+            return c
+    return None
+
+
+def _try_action(message: str, actor: str) -> dict | None:
+    """Run a tailor/queue action when the message asks for one.
+    Returns a chat reply dict, or None to fall through to the model."""
+    key = (str(db.current_path()), actor or "shared")
+    text = message.strip()
+    # queue follow-up ("queue it") after a tailor action
+    if _QUEUE_WORDS.search(text) and key in _last_action:
+        last = _last_action.pop(key)
+        db.queue_application(last["match_id"], last["tailored_id"])
+        return {"reply":
+                f"Queued — {last['consultant_name']} for "
+                f"{last['job_title']} at {last['company']} is now in the "
+                f"Apply Queue with the tailored resume attached. Nothing "
+                f"has been submitted to the employer; it is on the team's "
+                f"apply list.", "ai": False,
+                "action": {"type": "queued", "match_id": last["match_id"]}}
+    # tailor request
+    if _TAILOR_WORDS.search(text) and ("resume" in text.lower()
+                                      or "cv" in text.lower()):
+        consultants = db.list_consultants()
+        if not consultants:
+            return {"reply": "There are no consultants in this workspace "
+                             "yet — add one from the Consultants tab first.",
+                    "ai": False, "action": None}
+        c = _find_consultant(text, consultants)
+        if not c:
+            names = ", ".join(x["name"] for x in consultants)
+            return {"reply": f"Whose resume should I tailor? This "
+                             f"workspace has: {names}. Say, for example, "
+                             f"\"tailor {consultants[0]['name']}'s resume\".",
+                    "ai": False, "action": None}
+        matches = db.list_matches(c["id"])
+        if not matches:
+            return {"reply": f"{c['name']} has no matches yet — run a "
+                             f"job collection first, then ask me again.",
+                    "ai": False, "action": None}
+        low = text.lower()
+        pick = next((m for m in matches
+                     if (m.get("company") or "").lower() in low
+                     or (m.get("job_title") or "").lower() in low), matches[0])
+        out = _run_tailor(pick)
+        _last_action[key] = {
+            "match_id": pick["id"], "tailored_id": out["id"],
+            "consultant_name": c["name"], "job_title": pick["job_title"],
+            "company": pick["company"]}
+        made = ("the AI" if out["tailored_by"] == "llm"
+                else "the built-in editor (no AI key working in this "
+                     "workspace, so it ran in standard mode)")
+        reply = (f"Done — tailored {c['name']}'s resume for "
+                 f"{pick['job_title']} at {pick['company']} "
+                 f"(match score {pick['score']}), written by {made}.")
+        flagged = out["added_skills_flagged"] or []
+        if flagged:
+            reply += (f"\n\n⚠ Flagged — these were NOT added, because "
+                      f"they are not in the original resume: "
+                      f"{', '.join(flagged)}. If {c['name']} truly has "
+                      f"them, confirm in the match's Tailor screen.")
+        reply += ('\n\nSay "queue it" to add this to the Apply Queue '
+                  "with the tailored resume attached.")
+        return {"reply": reply, "ai": False,
+                "action": {"type": "tailored", "match_id": pick["id"],
+                           "tailored_id": out["id"]}}
+    return None
+
+
+def chat(message: str, history: list | None = None,
+         actor: str = "") -> dict:
+    """Answer one message, or run a tailor/queue action when asked.
+    Returns {"reply": str, "ai": bool, "action": dict | None}."""
     message = (message or "").strip()[:2000]
     if not message:
         return {"reply": "Ask me about your consultants, top matches, "
                          "the apply queue, or how anything in BenchPilot "
-                         "works.", "ai": False}
+                         "works.", "ai": False, "action": None}
+    acted = _try_action(message, actor)
+    if acted is not None:
+        return acted
     settings = db.get_settings()
     if not (settings.get("llm_base_url") and settings.get("llm_api_key")
             and settings.get("llm_model")):
-        return {"reply": _NO_AI, "ai": False}
+        return {"reply": _NO_AI, "ai": False, "action": None}
     messages = [{"role": "system",
                  "content": SYSTEM + "\n" + APP_GUIDE + "\n" + build_snapshot()}]
     for h in (history or [])[-8:]:
@@ -162,5 +272,6 @@ def chat(message: str, history: list | None = None) -> dict:
         return {"reply": "The AI didn't answer just now — the workspace's "
                          "AI settings may be unreachable. Try again in a "
                          "moment; if it keeps failing, an admin can check "
-                         "the AI settings in Settings.", "ai": False}
-    return {"reply": reply, "ai": True}
+                         "the AI settings in Settings.", "ai": False,
+                "action": None}
+    return {"reply": reply, "ai": True, "action": None}
