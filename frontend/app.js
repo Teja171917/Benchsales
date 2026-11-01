@@ -645,7 +645,23 @@ async function runCollection() {
 
 /* ================= MATCHES ================= */
 let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best",
-  emp: EMP_DEFAULT.slice(), unspec: true};
+  emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: ""};
+function cityOf(m) {
+  const loc = (m.location || "").trim();
+  return loc ? loc.split(",")[0].trim() : "";
+}
+function workTypeOf(m) {
+  if (m.remote_flag) return "remote";
+  const t = `${m.job_title || ""} ${m.location || ""}`.toLowerCase();
+  if (/\bremote\b|anywhere/.test(t)) return "remote";
+  if (/hybrid/.test(t)) return "hybrid";
+  return "onsite";
+}
+function workBadge(m) {
+  const w = workTypeOf(m);
+  return w === "remote" ? `<span class="badge">remote</span>`
+    : w === "hybrid" ? `<span class="badge">hybrid</span>` : "";
+}
 async function renderMatches() {
   const el = $("#tab-matches");
   el.innerHTML = `<div class="row spread"><h2>Matches</h2></div>
@@ -661,8 +677,14 @@ async function renderMatches() {
           <option value="best"${matchFilter.sort === "best" ? " selected" : ""}>Best score first</option>
           <option value="low"${matchFilter.sort === "low" ? " selected" : ""}>Lowest score first</option>
         </select></div>
+      <div><label class="flabel" for="mt-city">City</label>
+        <select id="mt-city"><option value="">All cities</option></select></div>
       <div><span class="flabel">&nbsp;</span>
         <button class="btn primary" id="mt-go">Apply filters</button></div>
+    </div>
+    <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:10px"><b>Work type</b>
+      <span class="chiprow" id="mt-work">${[["", "All"], ["remote", "Remote"], ["hybrid", "Hybrid"], ["onsite", "On-site"]].map(([k, label]) =>
+        `<label class="chip-toggle"><input type="radio" name="mt-work" value="${k}"${matchFilter.work === k ? " checked" : ""}><span>${label}</span></label>`).join("")}</span>
     </div>
     <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:10px"><b>Employment type</b>
       <span class="chiprow" id="mt-emp">${empChips(matchFilter.emp, "data-memp2")}</span>
@@ -685,6 +707,10 @@ async function renderMatches() {
     matchFilter.unspec = $("#mt-unspec").checked;
     loadMatches();
   };
+  // city + work type filter instantly, without the Apply button
+  $("#mt-city").onchange = () => { matchFilter.city = $("#mt-city").value; loadMatches(); };
+  $$("input[name='mt-work']").forEach((r) => { r.onchange = () => {
+    matchFilter.work = r.value; loadMatches(); }; });
   loadMatches();
 }
 async function loadMatches() {
@@ -696,15 +722,32 @@ async function loadMatches() {
   if (matchFilter.consultant_id) mq.set("consultant_id", matchFilter.consultant_id);
   let ms = await api(`/api/matches?${mq}`);
   if (matchFilter.source) ms = ms.filter((m) => m.source === matchFilter.source);
+  // the city list reflects the current consultant/score/source selection
+  const citySel = $("#mt-city");
+  if (citySel) {
+    // scope words ("Remote", "US", "Anywhere") are not cities — the
+    // Work type buttons already cover them
+    const NOT_CITY = new Set(["remote", "anywhere", "us", "usa",
+      "united states", "nationwide"]);
+    const cities = [...new Set(ms.map(cityOf).filter(
+      (c) => c && !NOT_CITY.has(c.toLowerCase())))].sort();
+    if (matchFilter.city && !cities.includes(matchFilter.city)) matchFilter.city = "";
+    citySel.innerHTML = `<option value="">All cities</option>` +
+      cities.map((c) => `<option value="${esc(c)}"${matchFilter.city === c ? " selected" : ""}>${esc(c)}</option>`).join("");
+  }
+  const total = ms.length;
   ms = ms.filter((m) => empPasses(m.emp_tags, matchFilter.emp, matchFilter.unspec));
+  if (matchFilter.city) ms = ms.filter((m) => cityOf(m) === matchFilter.city);
+  if (matchFilter.work) ms = ms.filter((m) => workTypeOf(m) === matchFilter.work);
   ms.sort((a, b) => matchFilter.sort === "low" ? a.score - b.score : b.score - a.score);
   const cnt = $("#mt-count");
-  if (cnt) cnt.textContent = `${ms.length} matches`;
+  if (cnt) cnt.textContent = ms.length === total ? `${ms.length} matches`
+    : `Showing ${ms.length} of ${total} matches`;
   el.innerHTML = ms.map((m) => `
     <div class="card">
       <div class="row spread">
         <div><b>${esc(m.job_title)}</b><div class="muted">${esc(m.company)} · ${esc(m.location)}</div>
-          <div>${tagBadges(m.emp_tags)}</div></div>
+          <div>${tagBadges(m.emp_tags)}${workBadge(m)}</div></div>
         <span class="badge ${esc(m.source)}">${esc(m.source)}</span>
       </div>
       <div class="row" style="margin:8px 0">
@@ -726,7 +769,9 @@ async function loadMatches() {
         <button class="btn" data-tailor="${m.id}">Tailor resume</button>
         <button class="btn primary" data-queue="${m.id}">Queue for apply</button>
       </div>
-    </div>`).join("") || `<div class="card muted">No matches at this threshold. Run a job collection first, or lower the match threshold in Settings.</div>`;
+    </div>`).join("") || `<div class="card muted">${(matchFilter.city || matchFilter.work)
+      ? "No matches with this city / work-type selection — try All cities or a different work type."
+      : "No matches at this threshold. Run a job collection first, or lower the match threshold in Settings."}</div>`;
   $$("[data-tailor]", el).forEach((b) => b.onclick = () => tailorModal(Number(b.dataset.tailor)));
   $$("[data-queue]", el).forEach((b) => b.onclick = async () => {
     await api(`/api/matches/${b.dataset.queue}/queue`, {method: "POST"});
