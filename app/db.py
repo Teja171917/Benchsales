@@ -147,6 +147,14 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    author TEXT DEFAULT '',
+    category TEXT DEFAULT 'idea',
+    text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS learned_skills (
     skill TEXT PRIMARY KEY,
     source TEXT DEFAULT '',
@@ -727,6 +735,33 @@ def list_matches(consultant_id: int | None = None,
         r["missing_skills"] = json.loads(r.pop("missing_skills_json") or "[]")
         _with_tags(r)
     return rows
+
+
+def create_feedback(author: str, category: str, text: str) -> dict:
+    """One feedback point from a team member (what they want changed or
+    added in the app). Read back by the workspace and by Rio to build."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO feedback(author, category, text, status, created_at) "
+            "VALUES (?, ?, ?, 'new', ?)",
+            (author or "", category or "idea", text, now_iso()))
+        fid = cur.lastrowid
+        row = conn.execute("SELECT * FROM feedback WHERE id=?",
+                           (fid,)).fetchone()
+    return dict(row)
+
+
+def list_feedback(limit: int = 200) -> list:
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM feedback ORDER BY id DESC LIMIT ?", (limit,))]
+
+
+def set_feedback_status(fid: int, status: str) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute("UPDATE feedback SET status=? WHERE id=?",
+                           (status, fid))
+        return cur.rowcount > 0
 
 
 def matches_summary(top_n: int = 8) -> dict:

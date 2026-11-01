@@ -1199,6 +1199,42 @@ def api_list_matches(consultant_id: int = 0, min_score: float = 0):
     return db.list_matches(consultant_id or None, min_score)
 
 
+@app.post("/api/feedback")
+async def api_create_feedback(request: Request):
+    """A team member leaves a feedback point: what they want in the app.
+    The author is the signed-in user when there is one."""
+    body = await request.json()
+    text = str(body.get("text") or "").strip()[:2000]
+    if not text:
+        raise HTTPException(400, "feedback text is empty")
+    category = str(body.get("category") or "idea")
+    if category not in ("feature", "problem", "idea"):
+        category = "idea"
+    author = str(body.get("name") or "").strip()[:80]
+    user = accounts.resolve_session(request.cookies.get(SESSION_COOKIE, ""))
+    if user:
+        author = user["email"]
+    elif not author:
+        author = "Team member"
+    return db.create_feedback(author, category, text)
+
+
+@app.get("/api/feedback")
+def api_list_feedback():
+    return db.list_feedback()
+
+
+@app.post("/api/feedback/{fid}/status")
+async def api_feedback_status(fid: int, request: Request):
+    body = await request.json()
+    status = str(body.get("status") or "")
+    if status not in ("new", "planned", "done", "dismissed"):
+        raise HTTPException(400, "unknown status")
+    if not db.set_feedback_status(fid, status):
+        raise HTTPException(404, "feedback not found")
+    return {"ok": True}
+
+
 @app.post("/api/assistant/chat")
 async def api_assistant_chat(request: Request):
     """In-app assistant: answers from the caller's own workspace data.

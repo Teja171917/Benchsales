@@ -76,14 +76,16 @@ function closeDrawer() {
 /* ---------- nav badges ---------- */
 async function refreshBadges() {
   try {
-    const [jobs, matches, apps, briefing] = await Promise.all([
+    const [jobs, matches, apps, briefing, feedback] = await Promise.all([
       api("/api/jobs/count"), api("/api/matches/summary"), api("/api/applications"),
       api("/api/office/briefing").catch(() => null),
+      api("/api/feedback").catch(() => null),
     ]);
     const set = (id, n) => { const b = $(id); if (b) b.textContent = n > 0 ? String(n) : ""; };
     set("#nb-jobs", jobs.count);
     set("#nb-matches", matches.total);
     set("#nb-queue", apps.filter((a) => !["rejected", "withdrawn"].includes(a.status)).length);
+    if (feedback) set("#nb-feedback", feedback.filter((f) => f.status === "new").length);
     if (briefing && briefing.agents) {
       const ag = briefing.agents;
       const attn = (ag.watchdog?.stale || 0) + (ag.tailor?.drafted || 0)
@@ -1211,6 +1213,59 @@ async function renderOverview() {
   refreshBadges();
 }
 
+
+/* ================= FEEDBACK ================= */
+const FB_CATS = {feature: "Feature request", problem: "Problem", idea: "Idea"};
+const FB_STATUS = {new: "New", planned: "Planned", done: "Done", dismissed: "Dismissed"};
+async function renderFeedback() {
+  const el = $("#tab-feedback");
+  let items = [];
+  try { items = await api("/api/feedback"); } catch (e) { /* list is best-effort */ }
+  el.innerHTML = `
+    <div class="row spread"><h2>Feedback</h2></div>
+    <div class="card">
+      <h3 style="margin-top:0">What should this app do for you?</h3>
+      <div class="muted" style="margin-bottom:8px">Tell the team what's missing, what's slow, or what you wish BenchPilot did. Every point lands here and gets picked up for building.</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <select id="fb-cat" class="input">
+          <option value="feature">Feature request</option>
+          <option value="problem">Problem</option>
+          <option value="idea" selected>Idea</option>
+        </select>
+        <input type="text" id="fb-name" class="input" placeholder="Your name (optional)" style="max-width:220px">
+      </div>
+      <textarea id="fb-text" class="input" rows="3" style="width:100%;margin-top:8px" placeholder="e.g. On Matches, let me filter by salary range…"></textarea>
+      <div style="margin-top:8px"><button class="btn primary" id="fb-send">Send feedback</button></div>
+    </div>
+    <div id="fb-list">${items.length ? items.map((f) => `
+      <div class="card">
+        <div class="row spread">
+          <div><span class="fb-chip fb-cat">${esc(FB_CATS[f.category] || "Idea")}</span>
+            <span class="fb-chip fb-${esc(f.status)}">${esc(FB_STATUS[f.status] || f.status)}</span>
+            <span class="muted">${esc(f.author || "Team member")} · ${esc(ago(f.created_at))}</span></div>
+          <div class="row" style="gap:6px">${["planned", "done", "dismissed"].filter((st) => st !== f.status).map((st) => `<button class="btn" data-fb-status="${f.id}:${st}">${st === "dismissed" ? "Dismiss" : "Mark " + st}</button>`).join("")}</div>
+        </div>
+        <div style="margin-top:6px">${esc(f.text)}</div>
+      </div>`).join("") : `<div class="card muted">No feedback yet — be the first to ask for something.</div>`}</div>`;
+  $("#fb-send").onclick = async () => {
+    const text = $("#fb-text").value.trim();
+    if (!text) { toast("Write the feedback first", "err"); return; }
+    try {
+      await api("/api/feedback", {method: "POST", body: JSON.stringify({
+        text, category: $("#fb-cat").value, name: $("#fb-name").value.trim()})});
+      toast("Feedback sent — thank you", "ok");
+      renderFeedback(); refreshBadges();
+    } catch (e) { toast("Couldn't send: " + e.message, "err"); }
+  };
+  $$("[data-fb-status]", el).forEach((b) => b.onclick = async () => {
+    const [fid, st] = b.dataset.fbStatus.split(":");
+    try {
+      await api(`/api/feedback/${fid}/status`, {method: "POST", body: JSON.stringify({status: st})});
+      renderFeedback(); refreshBadges();
+    } catch (e) { toast("Couldn't update: " + e.message, "err"); }
+  });
+}
+
 /* ================= AGENT OFFICE ================= */
 const AGENT_INFO = {
   scout: {name: "Scout", desc: "Watches the board for fresh matches above your threshold, grouped per consultant."},
@@ -1480,7 +1535,7 @@ function initAssistant() {
 /* ---------- router ---------- */
 function render(tab) {
   ({overview: renderOverview, consultants: renderConsultants, jobs: renderJobs, matches: renderMatches,
-    queue: renderQueue, office: renderOffice, settings: renderSettings})[tab]();
+    queue: renderQueue, office: renderOffice, feedback: renderFeedback, settings: renderSettings})[tab]();
 }
 initTheme();
 render("overview");
