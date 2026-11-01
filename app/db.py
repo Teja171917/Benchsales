@@ -729,6 +729,26 @@ def list_matches(consultant_id: int | None = None,
     return rows
 
 
+def matches_summary(top_n: int = 8) -> dict:
+    """Overview/badge data read from the stored (precomputed) matches: the
+    total count plus the top matches across consultants, in one small query
+    instead of shipping every match row to the browser."""
+    with get_conn() as conn:
+        total = conn.execute(
+            'SELECT COUNT(*) AS n FROM "matches"').fetchone()["n"]
+        rows = [dict(r) for r in conn.execute(
+            'SELECT m.id, m.consultant_id, m.job_id, m.score, '
+            'm.score_breakdown_json, j.title AS job_title, j.company, '
+            'j.location, j.remote_flag, j.posted_at, '
+            'c.name AS consultant_name '
+            'FROM "matches" m JOIN jobs j ON j.id=m.job_id '
+            'JOIN consultants c ON c.id=m.consultant_id '
+            'ORDER BY m.score DESC, m.id DESC LIMIT ?', (top_n,))]
+    for r in rows:
+        r["score_breakdown"] = json.loads(r.pop("score_breakdown_json") or "{}")
+    return {"total": total, "top": rows}
+
+
 def get_match(mid: int) -> dict | None:
     with get_conn() as conn:
         r = conn.execute(

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import accounts, autolearn, contact as contact_mod, db, emptype, market, portals, usa
@@ -24,6 +24,24 @@ from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, mo
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
+
+
+def _compute_asset_version() -> str:
+    """Short content hash of the two big frontend files. The index page
+    references them as app.js?v=<hash> / styles.css?v=<hash>, so a deploy
+    busts the browser cache automatically while an unchanged file can be
+    cached forever (see the middleware below)."""
+    import hashlib
+    h = hashlib.sha256()
+    for name in ("app.js", "styles.css"):
+        try:
+            h.update((FRONTEND_DIR / name).read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:12]
+
+
+ASSET_VERSION = _compute_asset_version()
 
 SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster, smartrecruiters]
 
@@ -96,9 +114,16 @@ async def auth_gate(request: Request, call_next):
     else:
         db.set_current(None)
     response = await call_next(request)
-    # make browsers re-check the page files, so an update shows without Ctrl+Shift+R
     path = request.url.path
-    if path == "/" or path.endswith((".html", ".js", ".css")):
+    if path in ("/app.js", "/styles.css") and \
+            request.query_params.get("v") == ASSET_VERSION:
+        # versioned asset: ?v= changes whenever the file does, so the
+        # browser may keep this exact copy for a year
+        response.headers["Cache-Control"] = \
+            "public, max-age=31536000, immutable"
+    elif path == "/" or path.endswith((".html", ".js", ".css")):
+        # unversioned pages and files: re-check, so an update shows
+        # without Ctrl+Shift+R
         response.headers["Cache-Control"] = "no-cache"
     return response
 
@@ -141,6 +166,19 @@ def _session_response(user: dict) -> JSONResponse:
                     httponly=True, secure=True, samesite="lax",
                     max_age=14 * 86400, path="/")
     return resp
+
+
+@app.get("/")
+@app.get("/index.html")
+def index_page():
+    """The app shell, with the two big assets versioned (?v=<hash>) so the
+    browser caches them hard between deploys. The HTML itself stays
+    no-cache, so a new deploy is picked up on the next load."""
+    html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace('href="styles.css"',
+                        f'href="styles.css?v={ASSET_VERSION}"')
+    html = html.replace('src="app.js"', f'src="app.js?v={ASSET_VERSION}"')
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/login")
@@ -1158,6 +1196,13 @@ def api_save_live(data: dict):
 @app.get("/api/matches")
 def api_list_matches(consultant_id: int = 0, min_score: float = 0):
     return db.list_matches(consultant_id or None, min_score)
+
+
+@app.get("/api/matches/summary")
+def api_matches_summary():
+    """Light overview/badge data from the precomputed matches table: the
+    total count and the top few matches, without shipping every row."""
+    return db.matches_summary()
 
 
 @app.get("/api/matches/{mid}")

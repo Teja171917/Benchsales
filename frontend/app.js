@@ -77,12 +77,12 @@ function closeDrawer() {
 async function refreshBadges() {
   try {
     const [jobs, matches, apps, briefing] = await Promise.all([
-      api("/api/jobs/count"), api("/api/matches?min_score=0"), api("/api/applications"),
+      api("/api/jobs/count"), api("/api/matches/summary"), api("/api/applications"),
       api("/api/office/briefing").catch(() => null),
     ]);
     const set = (id, n) => { const b = $(id); if (b) b.textContent = n > 0 ? String(n) : ""; };
     set("#nb-jobs", jobs.count);
-    set("#nb-matches", matches.length);
+    set("#nb-matches", matches.total);
     set("#nb-queue", apps.filter((a) => !["rejected", "withdrawn"].includes(a.status)).length);
     if (briefing && briefing.agents) {
       const ag = briefing.agents;
@@ -1156,7 +1156,7 @@ async function renderOverview() {
   try {
     const [cs, jobs, ms, apps, st] = await Promise.all([
       api("/api/consultants"), api("/api/jobs/count"),
-      api("/api/matches?min_score=0"), api("/api/applications"),
+      api("/api/matches/summary"), api("/api/applications"),
       api("/api/collect/status").catch(() => null),
     ]);
     const placed = apps.filter((a) => a.status === "placed").length;
@@ -1165,7 +1165,7 @@ async function renderOverview() {
     $("#ov-stats").innerHTML = [
       ["Consultants", cs.length, "", "consultants"],
       ["Jobs collected", jobs.count, "accent", "jobs"],
-      ["Matches", ms.length, "accent", "matches"],
+      ["Matches", ms.total, "accent", "matches"],
       ["Active applications", active, "", "queue"],
       ["Placed", placed, "good", "queue"],
     ].map(([l, n, cls, tab]) => `<div class="stat ${cls}" data-goto="${tab}" role="button" tabindex="0">
@@ -1189,7 +1189,7 @@ async function renderOverview() {
           ? `Auto-refresh every ${st.interval_minutes} min · last run ${ago(st.last_run_at)}${last}`
           : (st.last_run_at ? `Auto-refresh off · last run ${ago(st.last_run_at)}${last}` : "Auto-refresh off — no runs yet");
     } else f.textContent = "Status unavailable";
-    const top = ms.slice(0, 5);
+    const top = ms.top.slice(0, 5);
     $("#ov-top").innerHTML = top.map((m) => `
       <div class="topmatch"><div class="ti"><div class="tt">${esc(m.job_title)}</div>
         <div class="muted">${esc(m.company)} · ${esc(m.consultant_name)}</div></div>
