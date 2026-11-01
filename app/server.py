@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 
 from app import accounts, autolearn, contact as contact_mod, db, emptype, market, portals, usa
+from app import assistant as assistant_mod
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
@@ -1196,6 +1197,15 @@ def api_save_live(data: dict):
 @app.get("/api/matches")
 def api_list_matches(consultant_id: int = 0, min_score: float = 0):
     return db.list_matches(consultant_id or None, min_score)
+
+
+@app.post("/api/assistant/chat")
+async def api_assistant_chat(request: Request):
+    """In-app assistant: answers from the caller's own workspace data.
+    Read-only — it never changes data or submits anything."""
+    body = await request.json()
+    return assistant_mod.chat(str(body.get("message") or ""),
+                              body.get("history") or [])
 
 
 @app.get("/api/matches/summary")

@@ -1412,6 +1412,71 @@ async function renderOffice() {
   $$("[data-draftm]", el).forEach((b) => b.onclick = () => tailorModal(Number(b.dataset.draftm)));
 }
 
+
+/* ---------- in-app assistant ---------- */
+function initAssistant() {
+  if (document.querySelector(".asst-btn")) return;
+  const history = [];
+  const btn = document.createElement("button");
+  btn.className = "asst-btn";
+  btn.textContent = "💬 Assistant";
+  const panel = document.createElement("div");
+  panel.className = "asst-panel";
+  panel.innerHTML = `
+    <div class="asst-head"><span>BenchPilot Assistant</span><button type="button" class="asst-close" aria-label="Close">✕</button></div>
+    <div class="asst-msgs"></div>
+    <div class="asst-chips">
+      <button type="button" class="asst-chip">Show my top matches</button>
+      <button type="button" class="asst-chip">What's in my apply queue?</button>
+      <button type="button" class="asst-chip">Why is a match scored low?</button>
+      <button type="button" class="asst-chip">How do I approve a signup?</button>
+    </div>
+    <form class="asst-form"><input type="text" placeholder="Ask about your bench…" autocomplete="off"><button type="submit">Send</button></form>`;
+  document.body.appendChild(btn);
+  document.body.appendChild(panel);
+  const msgs = panel.querySelector(".asst-msgs");
+  const input = panel.querySelector(".asst-form input");
+  const sendBtn = panel.querySelector(".asst-form button");
+  const add = (role, text) => {
+    const d = document.createElement("div");
+    d.className = "asst-msg " + role;
+    d.textContent = text;
+    msgs.appendChild(d);
+    msgs.scrollTop = msgs.scrollHeight;
+  };
+  let greeted = false;
+  const toggle = (open) => {
+    panel.classList.toggle("open", open);
+    if (open && !greeted) {
+      greeted = true;
+      add("bot", "Hi — I can answer questions about this workspace: your consultants, top matches, the apply queue, and how BenchPilot works. Try one of the suggestions below.");
+    }
+    if (open) input.focus();
+  };
+  btn.onclick = () => toggle(!panel.classList.contains("open"));
+  panel.querySelector(".asst-close").onclick = () => toggle(false);
+  const send = async (text) => {
+    const q = (text || "").trim();
+    if (!q) return;
+    add("user", q);
+    input.value = "";
+    sendBtn.disabled = true;
+    try {
+      const r = await api("/api/assistant/chat", {method: "POST",
+        body: JSON.stringify({message: q, history})});
+      add("bot", r.reply || "No answer came back — try again.");
+      history.push({role: "user", content: q}, {role: "assistant", content: r.reply || ""});
+      if (history.length > 16) history.splice(0, history.length - 16);
+    } catch (e) {
+      add("bot", "Couldn't reach the assistant just now — try again in a moment.");
+    }
+    sendBtn.disabled = false;
+    input.focus();
+  };
+  panel.querySelector(".asst-form").onsubmit = (e) => { e.preventDefault(); send(input.value); };
+  panel.querySelectorAll(".asst-chip").forEach((c) => c.onclick = () => send(c.textContent));
+}
+
 /* ---------- router ---------- */
 function render(tab) {
   ({overview: renderOverview, consultants: renderConsultants, jobs: renderJobs, matches: renderMatches,
@@ -1420,3 +1485,4 @@ function render(tab) {
 initTheme();
 render("overview");
 refreshBadges();
+initAssistant();
