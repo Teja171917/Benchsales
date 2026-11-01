@@ -184,3 +184,16 @@ class AssistantActionTests(unittest.TestCase):
     def test_queue_it_without_tailor_falls_through(self):
         out = assistant.chat("queue it", actor="other@x.io")
         self.assertIsNone(out["action"])   # no pending action: normal chat
+
+    def test_find_consultant_by_any_name_part(self):
+        people = [{"name": "K. Abhinava"}, {"name": "Sandeep Kumar Reddy Gadige"},
+                  {"name": "Seetha Kalyani Kotha"}]
+        self.assertEqual(assistant._find_consultant(
+            "tailor Abhinava's resume", people)["name"], "K. Abhinava")
+        self.assertEqual(assistant._find_consultant(
+            "fix Seetha resume", people)["name"], "Seetha Kalyani Kotha")
+        self.assertEqual(assistant._find_consultant(
+            "tailor Sandeep's resume", people)["name"],
+            "Sandeep Kumar Reddy Gadige")
+        self.assertIsNone(assistant._find_consultant(
+            "tailor the resume", people))

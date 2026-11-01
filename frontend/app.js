@@ -769,12 +769,14 @@ async function loadMatches() {
       <div class="row" style="margin-top:10px">
         ${m.url ? `<a class="btn" href="${esc(m.url)}" target="_blank" rel="noopener">View posting</a>` : ""}
         <button class="btn" data-tailor="${m.id}">Tailor resume</button>
+        <button class="btn" data-applyplan="${m.id}">Apply plan</button>
         <button class="btn primary" data-queue="${m.id}">Queue for apply</button>
       </div>
     </div>`).join("") || `<div class="card muted">${(matchFilter.city || matchFilter.work)
       ? "No matches with this city / work-type selection — try All cities or a different work type."
       : "No matches at this threshold. Run a job collection first, or lower the match threshold in Settings."}</div>`;
   $$("[data-tailor]", el).forEach((b) => b.onclick = () => tailorModal(Number(b.dataset.tailor)));
+  $$("[data-applyplan]", el).forEach((b) => b.onclick = () => applyPlanModal(Number(b.dataset.applyplan)));
   $$("[data-queue]", el).forEach((b) => b.onclick = async () => {
     await api(`/api/matches/${b.dataset.queue}/queue`, {method: "POST"});
     toast("Queued for apply", "ok");
@@ -793,6 +795,40 @@ function diffHtml(orig, tailored) {
   }).join("\n");
   return {orig: mark(orig, t), tailored: mark(tailored, o)};
 }
+async function applyPlanModal(mid) {
+  openModal(`<h2>Apply plan</h2><div class="muted">Checking the posting and reading its application form…</div>`, true);
+  let plan;
+  try {
+    plan = await api(`/api/matches/${mid}/apply-plan`, {method: "POST"});
+  } catch (e) {
+    openModal(`<h2>Apply plan</h2><div class="errbox">${esc(e.message)}</div>
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="closeModal()">Close</button></div>`, true);
+    return;
+  }
+  const verdict = {
+    ready: `<span class="fb-chip st-done">Ready to apply</span> Live posting, and every required field is answered by ${esc(plan.consultant_name)}'s BenchPilot data.`,
+    blocked: `<span class="fb-chip st-new">A person must answer ${plan.blockers.length} field(s) first</span> The posting is live, but the fields below in red can't be answered from BenchPilot data — the plan stops there rather than guessing.`,
+    dead: `<span class="fb-chip st-dismissed">Posting is gone</span> No point applying — it would go nowhere.`,
+    unknown: `<span class="fb-chip st-planned">Couldn't verify</span> The posting couldn't be checked automatically (login wall, script-driven page, or network issue). Open it and check by eye.`,
+    no_url: `<span class="fb-chip st-planned">No application link</span> This job has no apply link on file.`,
+  }[plan.verdict] || "";
+  const rows = (plan.fields || []).map((f) => {
+    const st = {filled: "✓ ready", upload: "📎 attach", unanswered: "✋ needs a person",
+                skipped: "— optional, left blank"}[f.status] || f.status;
+    return `<tr><td>${esc(f.field)}${f.required ? ' <span class="muted">(required)</span>' : ""}</td>
+      <td>${esc(f.value)}</td><td>${st}</td></tr>`;
+  }).join("");
+  openModal(`
+    <div class="row spread"><h2>Apply plan</h2><button class="x" onclick="closeModal()">✕</button></div>
+    <p><strong>${esc(plan.job_title)}</strong> at <strong>${esc(plan.company)}</strong> — for ${esc(plan.consultant_name)}</p>
+    <p>${verdict}</p>
+    <p class="muted">Liveness: ${esc(plan.liveness_detail)}${plan.url ? ` · <a href="${esc(plan.url)}" target="_blank" rel="noopener">Open the posting</a>` : ""}</p>
+    <p class="muted">Resume: ${plan.has_tailored_resume ? "tailored version ready in BenchPilot" : "no tailored version yet — tailor it first for a stronger application"} · Cover letter: ${plan.has_cover_letter ? "saved" : "none saved"}</p>
+    ${rows ? `<table class="fb-table"><tr><th>Form field</th><th>Value from BenchPilot</th><th>Status</th></tr>${rows}</table>` : ""}
+    <div class="muted" style="margin-top:10px">This is a plan only — BenchPilot does not fill in or submit anything on the employer's site. A person applies using this map, or approves a pilot submission.</div>
+    <div class="row" style="margin-top:10px"><button class="btn" onclick="closeModal()">Close</button></div>`, true);
+}
+
 async function tailorModal(mid) {
   openModal(`<h2>Tailoring resume…</h2><div class="muted">Working…</div>`, true);
   let t;

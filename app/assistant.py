@@ -170,12 +170,19 @@ def _run_tailor(match: dict) -> dict:
 
 
 def _find_consultant(text: str, consultants: list) -> dict | None:
-    low = text.lower()
+    """Match a consultant by any distinctive part of their name — people
+    say "Abhinava" or "Seetha", not always the full roster name. The
+    consultant with the most name tokens present wins."""
+    low = " " + re.sub(r"[^a-z0-9 ]", " ", text.lower()) + " "
+    best, best_hits = None, 0
     for c in consultants:
-        name = (c.get("name") or "").lower()
-        if name and (name in low or name.split()[0] in low):
-            return c
-    return None
+        tokens = [t for t in re.split(r"[^a-z0-9]+",
+                                      (c.get("name") or "").lower())
+                  if len(t) >= 3]
+        hits = sum(1 for t in tokens if f" {t} " in low)
+        if hits > best_hits:
+            best, best_hits = c, hits
+    return best
 
 
 def _try_action(message: str, actor: str) -> dict | None:

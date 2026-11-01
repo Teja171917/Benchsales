@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from app import accounts, autolearn, contact as contact_mod, db, emptype, market, portals, usa
 from app import assistant as assistant_mod
 from app import coverletter as coverletter_mod
+from app import applyfill as applyfill_mod
 from app import matcher as matcher_mod
 from app import office as office_mod
 from app import resume as resume_mod
@@ -1265,6 +1266,16 @@ def api_create_cover_letter(mid: int):
     text, made_by = coverletter_mod.generate(
         consultant or {}, job, base_text, db.get_settings())
     return db.save_cover_letter(mid, text, made_by)
+
+
+@app.post("/api/matches/{mid}/apply-plan")
+def api_apply_plan(mid: int):
+    """Apply-assist: liveness check + form field mapping for this match.
+    A plan only — nothing is filled in or submitted anywhere."""
+    m = db.get_match(mid)
+    if not m:
+        raise HTTPException(404, "match not found")
+    return applyfill_mod.build_fill_plan(m)
 
 
 @app.get("/api/matches/{mid}/cover-letter")

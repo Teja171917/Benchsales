@@ -493,3 +493,10 @@ label.chip input { margin-right: 4px; }
 .fb-planned { background: var(--brand-soft); color: var(--brand-dark); }
 .fb-done { background: var(--green-bg); color: var(--green); }
 .fb-dismissed { background: var(--bg); color: var(--muted); }
+
+/* apply-plan field table */
+.fb-table { width: 100%; border-collapse: collapse; margin-top: 10px;
+  font-size: 13px; }
+.fb-table th, .fb-table td { text-align: left; padding: 6px 8px;
+  border-bottom: 1px solid #2a2f3a; vertical-align: top; }
+.fb-table th { color: #9aa3b2; font-weight: 600; }
