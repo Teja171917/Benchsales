@@ -236,10 +236,12 @@ async function renderConsultants() {
         <label class="btn">Upload resume
           <input type="file" data-upload="${c.id}" accept=".pdf,.docx,.txt" hidden>
         </label>
+        <button class="btn" data-gaps="${c.id}" data-gapsname="${esc(c.name)}">Skill gaps</button>
         <span class="muted" data-uploadmsg="${c.id}"></span>
       </div>
     </div>`).join("") || `<div class="card muted">No consultants yet. Press Add resumes (or Add consultant) above.</div>`;
 
+  $$("[data-gaps]", el).forEach((b) => b.onclick = () => skillGapsModal(Number(b.dataset.gaps), b.dataset.gapsname));
   $$("[data-edit]", el).forEach((b) => b.onclick = async () => {
     const c = await api(`/api/consultants/${b.dataset.edit}`);
     consultantModal(c);
@@ -276,6 +278,29 @@ async function renderConsultants() {
       renderConsultants();
     } catch (e) { msg.textContent = "error: " + e.message; toast("Upload failed: " + e.message, "err"); }
   });
+}
+
+async function skillGapsModal(cid, name) {
+  openModal(`<h2>Skill gaps</h2><div class="muted">Reading ${esc(name || "the consultant")}'s matches…</div>`, true);
+  let d;
+  try {
+    d = await api(`/api/consultants/${cid}/skill-gaps`);
+  } catch (e) {
+    openModal(`<h2>Skill gaps</h2><div class="errbox">${esc(e.message)}</div>
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="closeModal()">Close</button></div>`, true);
+    return;
+  }
+  const rows = (d.gaps || []).map((g) => `<tr>
+      <td><span class="chip miss">${esc(g.skill)}</span></td>
+      <td>missing in ${g.matches_missing} of ${d.matches_considered} matches</td>
+      <td>${g.demand_jobs ? `wanted by ${g.demand_jobs} recent job postings` : "no recent postings counted"}</td>
+    </tr>`).join("");
+  openModal(`
+    <div class="row spread"><h2>Skill gaps — ${esc(d.consultant_name || name || "")}</h2><button class="x" onclick="closeModal()">✕</button></div>
+    <p class="muted">Skills ${esc(d.consultant_name || "their")} matches keep asking for that the resume doesn't show — across ${d.matches_considered} matches (${d.gap_count} distinct gaps). This is the coaching and verification list: if the consultant truly has one of these, confirm it with them and update the resume — BenchPilot never adds a gap skill on its own.</p>
+    ${rows ? `<table class="fb-table"><tr><th>Skill</th><th>How often it blocks</th><th>Market demand</th></tr>${rows}</table>`
+           : `<div class="okbox">No gaps — every match's requirements are covered by the resume, or there are no matches yet.</div>`}
+    <div class="row" style="margin-top:10px"><button class="btn" onclick="closeModal()">Close</button></div>`, true);
 }
 
 function consultantModal(c) {

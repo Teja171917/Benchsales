@@ -197,3 +197,79 @@ class AssistantActionTests(unittest.TestCase):
             "Sandeep Kumar Reddy Gadige")
         self.assertIsNone(assistant._find_consultant(
             "tailor the resume", people))
+
+
+class AssistantSkillConfirmTests(unittest.TestCase):
+    """'Add the missing skills' must OFFER, never add. Only an explicit
+    'confirm <skill>' from the person adds — and only that skill."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "t.db"
+        db.init_db()
+        c = db.create_consultant({"name": "Pat Dev", "email": "pat@x.io"})
+        db.upsert_resume(c["id"], "pat.docx",
+                         "Pat Dev\nJava Spring Boot developer", ["java"])
+        self.cid = c["id"]
+        jid = db.insert_job({
+            "source": "t", "source_id": "s9", "title": "Java Dev",
+            "company": "Acme", "location": "Houston, TX", "remote_flag": 0,
+            "url": "", "description": "Java Kubernetes Terraform role",
+            "posted_at": "", "salary": "", "employment_type": ""})
+        with db.get_conn() as conn:
+            cur = conn.execute(
+                'INSERT INTO "matches"(consultant_id, job_id, score, '
+                'score_breakdown_json, missing_skills_json, created_at) '
+                "VALUES (?, ?, 88.0, '{}', "
+                "'[\"kubernetes\", \"terraform\"]', '2026-11-01T00:00:00Z')",
+                (self.cid, jid))
+            self.mid = cur.lastrowid
+        self._orig = assistant._run_tailor
+        assistant._run_tailor = lambda m: {
+            "id": db.insert_tailored(m["id"], "TAILORED TEXT", "template",
+                                     []),
+            "tailored_by": "template", "added_skills_flagged": []}
+
+    def tearDown(self):
+        assistant._run_tailor = self._orig
+        db.DB_PATH = self._old
+        self.tmp.cleanup()
+
+    def _tailored(self):
+        row = db.get_tailored_for_match(self.mid)
+        return db.get_tailored(row["id"]) if row else None
+
+    def test_offer_adds_nothing_then_confirm_adds_one(self):
+        out = assistant.chat("add the missing skills for Pat",
+                             actor="sam@x.io")
+        self.assertEqual(out["action"]["type"], "skills_offered")
+        t = self._tailored()
+        self.assertEqual(t["user_confirmed_skills"], [])   # nothing added
+        out = assistant.chat("confirm Kubernetes", actor="sam@x.io")
+        self.assertEqual(out["action"]["type"], "skills_confirmed")
+        self.assertEqual(out["action"]["added"], ["kubernetes"])
+        t = self._tailored()
+        self.assertEqual(t["user_confirmed_skills"], ["kubernetes"])
+        self.assertIn("Kubernetes", t["tailored_text"])
+        self.assertNotIn("Terraform", t["tailored_text"])
+        out = assistant.chat("queue it", actor="sam@x.io")
+        self.assertEqual(out["action"]["type"], "queued")
+
+    def test_confirm_all_and_skip(self):
+        assistant.chat("update the skills missed for this post for Pat",
+                       actor="jo@x.io")
+        out = assistant.chat("confirm all", actor="jo@x.io")
+        self.assertEqual(sorted(out["action"]["added"]),
+                         ["kubernetes", "terraform"])
+        # a fresh offer, then skip: nothing more changes
+        out = assistant.chat("add the missing skills for Pat",
+                             actor="jo@x.io")
+        self.assertIsNone(out["action"])     # nothing left to offer
+        self.assertIn("Nothing is missing", out["reply"])
+
+    def test_confirm_unknown_skill_adds_nothing(self):
+        assistant.chat("add the missing skills for Pat", actor="sam@x.io")
+        out = assistant.chat("confirm Cooking", actor="sam@x.io")
+        self.assertIsNone(out["action"])
+        self.assertEqual(self._tailored()["user_confirmed_skills"], [])

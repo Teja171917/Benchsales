@@ -17,6 +17,7 @@ import requests
 
 from . import db
 from . import tailor as tailor_mod
+from .skills import display_name
 
 SYSTEM = """You are the BenchPilot assistant, helping a bench sales /
 recruiting team inside their own BenchPilot workspace.
@@ -66,9 +67,12 @@ APP_GUIDE = """APP GUIDE:
 - Actions you can trigger by asking here: "tailor <name>'s resume" (or
   "fix the resume for <job>") tailors that consultant's resume for
   their best matching job; then "queue it" adds it to the Apply Queue
-  with the tailored resume attached. Skills flagged as not in the
-  original resume are never added without a person confirming them in
-  the Tailor screen.
+  with the tailored resume attached.
+- "Add the missing skills for this post" lists the skills a match asks
+  for that the resume doesn't show. They are added ONLY when the person
+  confirms them here ("confirm Kubernetes" / "confirm all") — that
+  confirmation is the attestation that the consultant truly has them,
+  recorded against the tailored resume. Nothing is ever added silently.
 """
 
 
@@ -88,12 +92,18 @@ def build_snapshot() -> str:
     lines.append(f"Consultants on the bench: {len(consultants)}")
     for c in consultants:
         n, best = per_consultant.get(c["id"], (0, None))
-        lines.append(
+        line = (
             f"- {c['name']}"
             + (f" ({c['location']})" if c.get("location") else "")
             + f": {n} matches"
             + (f", best score {best}" if best is not None else "")
             + ("" if c.get("has_resume") else ", NO RESUME uploaded"))
+        gaps = db.skill_gaps(c["id"], limit=5)["gaps"]
+        if gaps:
+            line += ("; top skill gaps (asked for by their matches, not "
+                     "on the resume): "
+                     + ", ".join(g["skill"] for g in gaps))
+        lines.append(line)
     lines.append(f"Jobs in the pool: {db.count_jobs()}")
     lines.append(f"Total matches: {summary['total']}")
     if summary["top"]:
@@ -185,11 +195,152 @@ def _find_consultant(text: str, consultants: list) -> dict | None:
     return best
 
 
+def _add_confirmed_skills(tailored: dict, match: dict,
+                          skills: list) -> list:
+    """The Tailor screen's honesty gate, run from chat: only skills
+    listed as missing for this match may be added, and only the ones
+    the person just confirmed. Returns the skills actually added."""
+    allowed = set(match.get("missing_skills") or [])
+    allowed |= set(tailored.get("user_confirmed_skills") or [])
+    clean = []
+    for s in skills:
+        if s in allowed and s not in clean:
+            clean.append(s)
+    if not clean:
+        return []
+    new_text = tailor_mod.add_skills_to_text(
+        tailored["tailored_text"], [display_name(s) for s in clean])
+    db.update_tailored(tailored["id"], new_text, clean)
+    return clean
+
+
 def _try_action(message: str, actor: str) -> dict | None:
     """Run a tailor/queue action when the message asks for one.
     Returns a chat reply dict, or None to fall through to the model."""
     key = (str(db.current_path()), actor or "shared")
     text = message.strip()
+    low = text.lower()
+    state = _last_action.get(key)
+
+    # --- step 2 of the skills flow: an explicit confirmation ----------
+    if state and state.get("kind") == "awaiting_skill_confirm":
+        candidates = state["candidates"]
+        if low.startswith("confirm") or "add them" in low \
+                or "add all" in low:
+            if "all" in low:
+                chosen = list(candidates)
+            else:
+                chosen = [c for c in candidates
+                          if c.lower() in low
+                          or display_name(c).lower() in low]
+            if not chosen:
+                return {"reply":
+                        "Which of these should I add? "
+                        + ", ".join(display_name(c) for c in candidates)
+                        + '. Reply e.g. "confirm '
+                        + display_name(candidates[0]) + '" or "confirm all".',
+                        "ai": False, "action": None}
+            t = db.get_tailored(state["tailored_id"])
+            m = db.get_match(state["match_id"])
+            added = _add_confirmed_skills(t, m, chosen)
+            state["kind"] = "tailored"
+            state.pop("candidates", None)
+            remaining = [c for c in candidates if c not in added]
+            reply = ("Added to the tailored resume: "
+                     + ", ".join(display_name(a) for a in added)
+                     + f" — recorded as confirmed by you for "
+                       f"{state['consultant_name']}.")
+            if remaining:
+                reply += ("\n\nNot added: "
+                          + ", ".join(display_name(r) for r in remaining)
+                          + ".")
+            reply += ('\n\nSay "queue it" to queue the updated resume '
+                      "for this job.")
+            return {"reply": reply, "ai": False,
+                    "action": {"type": "skills_confirmed",
+                               "match_id": state["match_id"],
+                               "added": added}}
+        if any(w in low for w in ("skip", "none", "don't", "do not",
+                                  "no thanks")):
+            state["kind"] = "tailored"
+            state.pop("candidates", None)
+            return {"reply":
+                    "OK — nothing was added. The tailored resume stays "
+                    "exactly as the consultant's real resume supports."
+                    '\n\nSay "queue it" to queue it as-is.',
+                    "ai": False, "action": None}
+
+    # --- step 1 of the skills flow: offer the missing skills ----------
+    if "skill" in low and any(w in low for w in
+                              ("add", "update", "miss", "fix", "include",
+                               "cover")):
+        consultants = db.list_consultants()
+        c = _find_consultant(text, consultants)
+        match = None
+        if c:
+            matches = db.list_matches(c["id"])
+            if matches:
+                match = next((m for m in matches
+                              if (m.get("company") or "").lower() in low
+                              or (m.get("job_title") or "").lower()
+                              in low), matches[0])
+        elif state and state.get("match_id"):
+            match = db.get_match(state["match_id"])
+            c = next((x for x in consultants
+                      if x["name"] == state.get("consultant_name")), None)
+        if not c or not match:
+            names = ", ".join(x["name"] for x in consultants)
+            return {"reply":
+                    "Whose missing skills — and for which post? This "
+                    f"workspace has: {names}. Say, for example, "
+                    f"\"add the missing skills for "
+                    f"{consultants[0]['name'] if consultants else 'a consultant'}\".",
+                    "ai": False, "action": None}
+        full = db.get_match(match["id"])
+        row = db.get_tailored_for_match(match["id"])
+        if not row:
+            out = _run_tailor(full)
+            row = {"id": out["id"]}
+        tailored = db.get_tailored(row["id"])
+        already = set(tailored.get("user_confirmed_skills") or [])
+        candidates = []
+        for s in (full.get("missing_skills") or []) \
+                + (tailored.get("added_skills_flagged") or []):
+            if s not in already and s not in candidates:
+                candidates.append(s)
+        if not candidates:
+            _last_action[key] = {
+                "kind": "tailored", "match_id": match["id"],
+                "tailored_id": tailored["id"],
+                "consultant_name": c["name"],
+                "job_title": full["job_title"], "company": full["company"]}
+            return {"reply":
+                    f"Nothing is missing — {c['name']}'s resume already "
+                    f"covers every skill the {full['job_title']} post at "
+                    f"{full['company']} asks for."
+                    '\n\nSay "queue it" to queue the tailored resume.',
+                    "ai": False, "action": None}
+        _last_action[key] = {
+            "kind": "awaiting_skill_confirm", "match_id": match["id"],
+            "tailored_id": tailored["id"], "candidates": candidates,
+            "consultant_name": c["name"], "job_title": full["job_title"],
+            "company": full["company"]}
+        return {"reply":
+                f"For {full['job_title']} at {full['company']}, "
+                f"{c['name']}'s resume is missing: "
+                + ", ".join(display_name(s) for s in candidates)
+                + ".\n\nI won't add these on my own — that would be "
+                  "inventing experience. If "
+                + c["name"]
+                + " truly has them, reply \"confirm "
+                + display_name(candidates[0])
+                + "\" (name each one) or \"confirm all\", and I will add "
+                  "exactly those to the tailored resume, recorded as "
+                  "confirmed by you.",
+                "ai": False,
+                "action": {"type": "skills_offered",
+                           "match_id": match["id"],
+                           "candidates": candidates}}
     # queue follow-up ("queue it") after a tailor action
     if _QUEUE_WORDS.search(text) and key in _last_action:
         last = _last_action.pop(key)
@@ -227,6 +378,7 @@ def _try_action(message: str, actor: str) -> dict | None:
                      or (m.get("job_title") or "").lower() in low), matches[0])
         out = _run_tailor(pick)
         _last_action[key] = {
+            "kind": "tailored",
             "match_id": pick["id"], "tailored_id": out["id"],
             "consultant_name": c["name"], "job_title": pick["job_title"],
             "company": pick["company"]}
@@ -242,6 +394,12 @@ def _try_action(message: str, actor: str) -> dict | None:
                       f"they are not in the original resume: "
                       f"{', '.join(flagged)}. If {c['name']} truly has "
                       f"them, confirm in the match's Tailor screen.")
+        missing = pick.get("missing_skills") or []
+        if missing:
+            reply += ("\n\nMissing for this post: "
+                      + ", ".join(display_name(s) for s in missing[:8])
+                      + '. Say "add the missing skills" to review them '
+                        "for confirmation.")
         reply += ('\n\nSay "queue it" to add this to the Apply Queue '
                   "with the tailored resume attached.")
         return {"reply": reply, "ai": False,

@@ -1006,3 +1006,22 @@ def update_application(aid: int, status: str | None, notes: str | None) -> dict 
         conn.commit()
         r = conn.execute("SELECT * FROM applications WHERE id=?", (aid,)).fetchone()
         return dict(r) if r else None
+
+
+def skill_gaps(cid: int, limit: int = 12) -> dict:
+    """Roll up one consultant's missing skills across all their matches:
+    for each gap, how many of their matches ask for it. This is the
+    bench-readiness view — skills the market wants that the resume does
+    not show. Never used to add anything to a resume."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            'SELECT missing_skills_json FROM "matches" '
+            "WHERE consultant_id=?", (cid,)).fetchall()
+    counts: dict = {}
+    for r in rows:
+        for s in set(json.loads(r["missing_skills_json"] or "[]")):
+            counts[s] = counts.get(s, 0) + 1
+    gaps = [{"skill": s, "matches_missing": n}
+            for s, n in sorted(counts.items(), key=lambda kv: -kv[1])]
+    return {"consultant_id": cid, "matches_considered": len(rows),
+            "gaps": gaps[:limit], "gap_count": len(gaps)}

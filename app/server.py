@@ -702,6 +702,22 @@ def api_create_consultant(data: dict):
     return db.create_consultant(data)
 
 
+@app.get("/api/consultants/{cid}/skill-gaps")
+def api_skill_gaps(cid: int):
+    """Bench-readiness: the skills this consultant's matches keep asking
+    for that the resume doesn't show, ranked by how many matches miss
+    them, with live market demand alongside."""
+    c = db.get_consultant(cid)
+    if not c:
+        raise HTTPException(404, "consultant not found")
+    out = db.skill_gaps(cid)
+    demand = market.demand_map()
+    for g in out["gaps"]:
+        g["demand_jobs"] = demand.get(g["skill"], 0)
+    out["consultant_name"] = c["name"]
+    return out
+
+
 @app.get("/api/consultants/{cid}")
 def api_get_consultant(cid: int):
     c = db.get_consultant(cid)
