@@ -746,8 +746,8 @@ async function loadMatches() {
   el.innerHTML = ms.map((m) => `
     <div class="card">
       <div class="row spread">
-        <div><b>${esc(m.job_title)}</b><div class="muted">${esc(m.company)} · ${esc(m.location)}</div>
-          <div>${tagBadges(m.emp_tags)}${workBadge(m)}</div></div>
+        <div><b>${esc(m.job_title)}</b><div class="muted">${esc(m.company)}${m.salary ? ` · 💰 ${esc(m.salary)}` : ""}${m.posted_at ? ` · 📅 posted ${esc(ago(m.posted_at))}` : ""}</div>
+          <div>${tagBadges(m.emp_tags)}</div></div>
         <span class="badge ${esc(m.source)}">${esc(m.source)}</span>
       </div>
       <div class="row" style="margin:8px 0">
