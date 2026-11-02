@@ -226,6 +226,15 @@ def create_user(email: str, name: str, password: str, role: str = "member",
 # Gmail-only and are approved by the main workspace's admin; company
 # accounts must use the company's own email domain and are approved by
 # that company's admin. Every other email domain is blocked for now.
+# The owner account: the one person who may see and change Settings
+# in any workspace (API keys and collection controls live there).
+OWNER_EMAIL = "saiteja.ks222@gmail.com"
+
+
+def is_owner_email(email) -> bool:
+    return (email or "").strip().lower() == OWNER_EMAIL
+
+
 PERSONAL_DOMAINS = {"gmail.com"}
 COMPANY_EMAIL_DOMAINS = {"rsatech": "rsatech.com"}
 

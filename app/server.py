@@ -142,6 +142,18 @@ def _startup():
     accounts.init_accounts()   # individual user logins live in their own file
     persist.start_background()
     autolearn.sync_vocabulary()  # learned skills back into memory after a restart
+    # warm each workspace's market-demand cache in the background, so
+    # the first tailor click after a restart is not the one paying
+    # for the full job-description scan
+    def _warm_demand():
+        for path in db.all_paths():
+            try:
+                with db.use(path):
+                    market.demand_map()
+            except Exception:
+                pass
+    threading.Thread(target=_warm_demand, daemon=True,
+                     name="benchpilot-demand-warm").start()
     t = threading.Thread(target=_auto_collect_loop, daemon=True,
                          name="benchpilot-auto-collect")
     t.start()
@@ -299,7 +311,8 @@ def auth_me(request: Request):
                 "workspace_users": accounts.count_users(user.get("company_slug")),
                 "admin_scope": sorted(scope),
                 "pending_approvals": pending,
-                "is_admin": user.get("role") == "admin"}
+                "is_admin": user.get("role") == "admin",
+                "can_settings": accounts.is_owner_email(user.get("email"))}
     basic = getattr(request.state, "basic_target", _NO_BASIC)
     if basic is not _NO_BASIC:
         slug = accounts._slug_for_path(basic)
@@ -307,10 +320,12 @@ def auth_me(request: Request):
                 "workspace_users": accounts.count_users(
                     None if slug == "main" else slug),
                 "admin_scope": sorted(scope),
-                "pending_approvals": pending, "is_admin": True}
+                "pending_approvals": pending, "is_admin": True,
+                "can_settings": basic is None}
     return {"user": None, "basic_workspace": None, "workspace_users": 0,
             "admin_scope": [], "pending_approvals": 0,
-            "is_admin": _caller_admin(request)}
+            "is_admin": _caller_admin(request),
+            "can_settings": _can_settings(request)}
 
 
 @app.get("/api/auth/google/login")
@@ -1537,13 +1552,41 @@ def _mask(key: str, value: str) -> str:
     return value
 
 
-@app.get("/api/settings")
-def api_get_settings():
+def _can_settings(request: Request) -> bool:
+    """Settings (API keys, sources, thresholds) are owner-only: the
+    owner's own account, or the legacy main shared login — which is
+    also the owner. Company logins, company admins and all members
+    are excluded, in every workspace. With no auth configured at all
+    (local dev) everything is open, as elsewhere."""
+    user = getattr(request.state, "user", None)
+    if user:
+        return accounts.is_owner_email(user.get("email"))
+    basic = getattr(request.state, "basic_target", _NO_BASIC)
+    if basic is not _NO_BASIC:
+        return basic is None
+    return not (os.environ.get("BENCHPILOT_PASSWORD") or db.companies()
+                or accounts.any_users())
+
+
+def _require_settings(request: Request) -> None:
+    if not _can_settings(request):
+        raise HTTPException(
+            403, "settings are restricted to the owner account")
+
+
+def _settings_view() -> dict:
     return {k: _mask(k, v) for k, v in db.get_settings().items()}
 
 
+@app.get("/api/settings")
+def api_get_settings(request: Request):
+    _require_settings(request)
+    return _settings_view()
+
+
 @app.put("/api/settings")
-def api_put_settings(data: dict):
+def api_put_settings(request: Request, data: dict):
+    _require_settings(request)
     allowed = {"match_threshold", "search_queries", "enabled_sources",
                "adzuna_app_id", "adzuna_app_key", "rapidapi_key",
                "llm_base_url", "llm_api_key", "llm_model",
@@ -1558,7 +1601,7 @@ def api_put_settings(data: dict):
         if k in MASKED_KEYS and isinstance(v, str) and "***" in v:
             continue  # masked value echoed back -> keep existing
         db.set_setting(k, v if isinstance(v, str) else json.dumps(v))
-    return api_get_settings()
+    return _settings_view()
 
 
 @app.get("/api/sources/status")

@@ -24,6 +24,10 @@ const STATUS_LABEL = {queued: "Queued", applied: "Applied",
 let ME = null;
 async function loadMe() {
   try { ME = await api("/api/auth/me"); } catch (e) { /* leave null */ }
+  if (ME && ME.can_settings === false) {
+    const b = $('#tabs button[data-tab="settings"]');
+    if (b) b.style.display = "none";
+  }
   return ME;
 }
 function ago(iso) {
@@ -1094,6 +1098,12 @@ async function renderQueue() {
 /* ================= SETTINGS ================= */
 async function renderSettings() {
   const el = $("#tab-settings");
+  if (!ME) await loadMe();
+  if (ME && ME.can_settings === false) {
+    el.innerHTML = `<div class="row spread"><h2>Settings</h2></div>
+      <div class="card muted">Settings are restricted to the owner account — API keys and collection controls live there. Ask the owner if something needs changing.</div>`;
+    return;
+  }
   const s = await api("/api/settings");
   const srcs = await api("/api/sources/status");
   let queries = [];
