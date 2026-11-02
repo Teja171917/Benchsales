@@ -673,11 +673,20 @@ def _with_tags(row: dict) -> dict:
     return row
 
 
+# the columns the Jobs table actually renders; the full description
+# (the bulk of every row) is fetched per job when its drawer opens
+LIGHT_JOB_COLUMNS = ("id, source, title, company, location, remote_flag, "
+                     "url, posted_at, fetched_at, salary, "
+                     "employment_type, emp_tags")
+
+
 def list_jobs(source: str = "", q: str = "", limit: int = 50,
-              emp: list | None = None, include_unspecified: bool = False) -> list:
+              emp: list | None = None, include_unspecified: bool = False,
+              light: bool = False) -> list:
     """emp: employment tags to keep (OR). Jobs with no detectable type are kept
-    only when include_unspecified is true."""
-    sql = "SELECT * FROM jobs WHERE 1=1"
+    only when include_unspecified is true. light=True skips the job
+    descriptions, which dominate the payload."""
+    sql = f"SELECT {LIGHT_JOB_COLUMNS if light else '*'} FROM jobs WHERE 1=1"
     vals: list = []
     if source:
         sql += " AND source=?"

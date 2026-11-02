@@ -1064,14 +1064,18 @@ def api_job_cities():
 @app.get("/api/jobs")
 def api_list_jobs(request: Request, source: str = "", q: str = "",
                   limit: int = 50,
-                  emp: str = "", include_unspecified: bool = False):
+                  emp: str = "", include_unspecified: bool = False,
+                  light: int = 0):
     """emp = comma list of full-time/c2c/w2/... tags (OR). Jobs whose type
     could not be detected are hidden when emp is set, unless
-    include_unspecified=true."""
+    include_unspecified=true. light=1 returns rows without the job
+    descriptions (the Jobs table); fetch /api/jobs/{id} for the full
+    posting."""
     _require_owner(request)
     return db.list_jobs(source=source, q=q, limit=limit,
                         emp=emptype.parse_wanted(emp),
-                        include_unspecified=include_unspecified)
+                        include_unspecified=include_unspecified,
+                        light=bool(light))
 
 
 @app.get("/api/emp-types")
@@ -1126,6 +1130,16 @@ LIVE_SOURCES = [adzuna, jsearch, dice, remoteok, remotive, arbeitnow, smartrecru
 def api_jobs_count():
     """Total jobs in the job board (the list endpoints are capped for speed)."""
     return {"count": db.count_jobs()}
+
+
+@app.get("/api/jobs/{jid}")
+def api_get_job(request: Request, jid: int):
+    """One full job posting (with description) for the job drawer."""
+    _require_owner(request)
+    job = db.get_job(jid)
+    if not job:
+        raise HTTPException(404, "job not found")
+    return db._with_tags(job)
 
 
 @app.get("/api/firms")

@@ -396,6 +396,14 @@ function jobDrawerHtml(j, opts) {
 }
 async function openJobDrawer(job, opts) {
   opts = opts || {};
+  if (job.id && job.description === undefined && !opts.unsaved) {
+    try {
+      const full = await api(`/api/jobs/${job.id}`);
+      const ix = jobsCache.findIndex((x) => x.id === job.id);
+      if (ix >= 0) jobsCache[ix] = full;
+      job = full;
+    } catch (e) { /* fall through with the light row */ }
+  }
   openDrawer(jobDrawerHtml(job, opts));
   const box = $("#dr-matches");
   const sv = $("#dr-save");
@@ -427,6 +435,7 @@ const jobsDefaults = () => ({source: "", q: "", remote: false, location: "", emp
   unspec: true, posted: "", sort: "newest"});
 let jobsFilter = jobsDefaults();
 let jobsCache = [];
+let jobsShown = 100;
 async function renderJobs() {
   const el = $("#tab-jobs");
   if (!ME) await loadMe();
@@ -604,19 +613,31 @@ async function loadJobs() {
   const el = $("#j-list");
   if (!el) return;
   el.innerHTML = skelRows(8);
-  jobsCache = await api("/api/jobs?limit=1000");
-  const marketCities = await api("/api/jobs/cities").catch(() => []);
-  const citySel0 = $("#mt-city");
-  if (citySel0) {
+  try {
+    jobsCache = await api("/api/jobs?limit=1000&light=1");
+  } catch (e) {
+    el.innerHTML = `<div class="card muted">The job pool didn't load (${esc(e.message)}). <button class="btn" id="j-retry">Retry</button></div>`;
+    const rt = $("#j-retry");
+    if (rt) rt.onclick = () => loadJobs();
+    return;
+  }
+  jobsShown = 100;
+  applyJobFilters();
+  // the dropdown fills ride along in parallel; they never block the table
+  api("/api/jobs/cities").then((marketCities) => {
+    const citySel0 = $("#mt-city");
+    if (!citySel0) return;
     if (matchFilter.city && !marketCities.some((c) => c.city === matchFilter.city)) matchFilter.city = "";
     citySel0.innerHTML = `<option value="">All cities</option>` +
       marketCities.map((c) => `<option value="${esc(c.city)}"${matchFilter.city === c.city ? " selected" : ""}>${esc(c.city)} (${c.jobs})</option>`).join("");
-  }
-  const srcs = await api("/api/sources/status");
-  $("#j-source").innerHTML = `<option value="">All sources</option>` +
-    srcs.filter((s) => s.name !== "urlimport")
-      .map((s) => `<option value="${s.name}"${jobsFilter.source === s.name ? " selected" : ""}>${esc(s.label)}</option>`).join("");
-  applyJobFilters();
+  }).catch(() => {});
+  api("/api/sources/status").then((srcs) => {
+    const sel = $("#j-source");
+    if (!sel) return;
+    sel.innerHTML = `<option value="">All sources</option>` +
+      srcs.filter((s) => s.name !== "urlimport")
+        .map((s) => `<option value="${s.name}"${jobsFilter.source === s.name ? " selected" : ""}>${esc(s.label)}</option>`).join("");
+  }).catch(() => {});
 }
 function jobMatches(j) {
   const f = jobsFilter;
@@ -636,7 +657,8 @@ function jobMatches(j) {
   }
   return true;
 }
-function applyJobFilters() {
+function applyJobFilters(resetShown) {
+  if (resetShown !== false) jobsShown = 100;
   const list = jobsCache.filter(jobMatches);
   const ts = (j) => { const d = new Date(j.posted_at || 0); return isNaN(d.getTime()) ? 0 : d.getTime(); };
   const s = jobsFilter.sort;
@@ -644,17 +666,21 @@ function applyJobFilters() {
     : s === "company" ? (a.company || "").localeCompare(b.company || "")
     : s === "oldest" ? ts(a) - ts(b) : ts(b) - ts(a));
   const cnt = $("#j-count");
-  if (cnt) cnt.textContent = `Showing ${list.length} of ${jobsCache.length} jobs`;
+  const page = list.slice(0, jobsShown);
+  if (cnt) cnt.textContent = `Showing ${page.length} of ${list.length} jobs (${jobsCache.length} in the pool)`;
   $("#j-list").innerHTML = `<div class="card" style="padding:0"><table class="jobs">
     <tr><th>Title</th><th>Company</th><th>Location</th><th>Source</th><th>Posted</th><th></th></tr>
-    ${list.map((j) => `<tr data-jobid="${j.id}">
+    ${page.map((j) => `<tr data-jobid="${j.id}">
       <td><b>${esc(j.title)}</b>${j.salary ? `<div class="muted">${esc(j.salary)}</div>` : ""}<div>${tagBadges(j.emp_tags)}</div></td>
       <td>${esc(j.company)}</td><td>${esc(j.location)}${j.remote_flag && !/remote/i.test(j.location || "") ? " (remote)" : ""}</td>
       <td><span class="badge ${esc(j.source)}">${esc(j.source)}</span></td>
       <td class="muted" title="${esc((j.posted_at || "").slice(0, 10))}">${j.posted_at ? esc(ago(j.posted_at)) : "—"}</td>
       <td>${j.url ? `<a href="${esc(j.url)}" target="_blank" rel="noopener">view</a>` : ""}</td>
     </tr>`).join("") || `<tr><td colspan="6" class="muted">No jobs match these filters.</td></tr>`}
-    </table></div>`;
+    </table></div>
+    ${list.length > jobsShown ? `<div class="row" style="justify-content:center;margin-top:10px"><button class="btn" id="j-more">Show more (${list.length - jobsShown} more)</button></div>` : ""}`;
+  const more = $("#j-more");
+  if (more) more.onclick = () => { jobsShown += 100; applyJobFilters(false); };
 }
 async function updateFreshness() {
   const f = $("#j-fresh");
@@ -698,7 +724,7 @@ async function runCollection() {
 
 /* ================= MATCHES ================= */
 let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best",
-  emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: ""};
+  emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: []};
 // the matches list is fetched ONCE per consultant/threshold choice and
 // kept here: city / sort / work-type / source clicks then filter this
 // copy instantly instead of re-downloading the whole list every time
@@ -753,8 +779,8 @@ async function renderMatches() {
         <button class="btn primary" id="mt-go">Apply filters</button></div>
     </div>
     <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:10px"><b>Work type</b>
-      <span class="chiprow" id="mt-work">${[["", "All"], ["remote", "Remote"], ["hybrid", "Hybrid"], ["onsite", "On-site"]].map(([k, label]) =>
-        `<label class="chip-toggle"><input type="radio" name="mt-work" value="${k}"${matchFilter.work === k ? " checked" : ""}><span>${label}</span></label>`).join("")}</span>
+      <span class="chiprow" id="mt-work">${workChipsHtml()}</span>
+      <span class="muted">pick any combination</span>
     </div>
     <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:10px"><b>Employment type</b>
       <span class="chiprow" id="mt-emp">${empChips(matchFilter.emp, "data-memp2")}</span>
@@ -787,8 +813,7 @@ async function renderMatches() {
   // city, sort and work type filter instantly, without the Apply button
   $("#mt-city").onchange = () => { matchFilter.city = $("#mt-city").value; loadMatches(); };
   $("#mt-sort").onchange = () => { matchFilter.sort = $("#mt-sort").value; loadMatches(); };
-  $$("input[name='mt-work']").forEach((r) => { r.onchange = () => {
-    matchFilter.work = r.value; loadMatches(); }; });
+  bindWorkChips();
   loadMatches(true);
 }
 async function loadMatches(force) {
@@ -805,6 +830,23 @@ async function loadMatches(force) {
   }
   renderMatchCards();
 }
+function workChipsHtml() {
+  const opts = [["", "All"], ["remote", "Remote"], ["hybrid", "Hybrid"], ["onsite", "On-site"]];
+  return opts.map(([k, label]) => {
+    const on = k === "" ? matchFilter.work.length === 0 : matchFilter.work.includes(k);
+    return `<label class="chip-toggle"><input type="checkbox" data-work="${k}"${on ? " checked" : ""}><span>${label}</span></label>`;
+  }).join("");
+}
+function bindWorkChips() {
+  $$("#mt-work input[data-work]").forEach((r) => { r.onchange = () => {
+    if (r.dataset.work === "") matchFilter.work = [];
+    else if (r.checked) matchFilter.work = [...new Set([...matchFilter.work, r.dataset.work])];
+    else matchFilter.work = matchFilter.work.filter((w) => w !== r.dataset.work);
+    const box = $("#mt-work");
+    if (box) { box.innerHTML = workChipsHtml(); bindWorkChips(); }
+    loadMatches();
+  }; });
+}
 function renderMatchCards() {
   const el = $("#mt-list");
   let ms = [...(matchesCache.rows || [])];
@@ -812,7 +854,7 @@ function renderMatchCards() {
   const total = ms.length;
   ms = ms.filter((m) => empPasses(m.emp_tags, matchFilter.emp, matchFilter.unspec));
   if (matchFilter.city) ms = ms.filter((m) => cityOf(m) === matchFilter.city);
-  if (matchFilter.work) ms = ms.filter((m) => workTypeOf(m) === matchFilter.work);
+  if (matchFilter.work.length) ms = ms.filter((m) => matchFilter.work.includes(workTypeOf(m)));
   const postedTs = (m) => { const t = Date.parse(m.posted_at || ""); return isNaN(t) ? 0 : t; };
   if (matchFilter.sort === "low") ms.sort((a, b) => a.score - b.score);
   else if (matchFilter.sort === "new") ms.sort((a, b) => (postedTs(b) - postedTs(a)) || (b.score - a.score));
