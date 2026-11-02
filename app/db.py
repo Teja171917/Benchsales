@@ -1059,10 +1059,6 @@ _NOT_CITY_STATES = {"texas", "california", "new york",
 }
 
 
-_NYC_BOROUGHS = {"manhattan", "brooklyn", "queens", "bronx",
-                "staten island"}
-
-
 def job_cities() -> list:
     """Every US city in the job pool, with its live job count — the
     Matches city filter is built from this, so the team sees the whole
@@ -1075,22 +1071,13 @@ def job_cities() -> list:
         loc = (r["location"] or "").strip()
         if not loc:
             continue
-        parts = [x.strip() for x in loc.split(",")]
-        city = parts[0]
+        city = loc.split(",")[0].strip()
         if city.lower().startswith("remote - "):
             city = city[len("Remote - "):].strip()
         if not city or city.lower() in _NOT_CITIES:
             continue
         if "," not in loc and city.lower() in _NOT_CITY_STATES:
             continue     # the whole location is just a state name
-        if len(parts) >= 2:
-            # Adzuna-style "Locality, Harris County" names a district,
-            # not a city — leave those jobs out of the city list rather
-            # than invent one. NYC boroughs do mean New York city.
-            if parts[1].lower().endswith(" county"):
-                continue
-            if parts[1].lower() in _NYC_BOROUGHS:
-                city = "New York"
         counts[city] = counts.get(city, 0) + 1
     return [{"city": c, "jobs": n} for c, n in
             sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
