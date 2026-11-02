@@ -100,7 +100,8 @@ def classify_auth(text: str) -> str:
 
 def status_key(visa_status: str) -> str:
     """Normalise free-text consultant visa status to a key:
-    citizen / green_card / h1b / opt_ead / other_ead / tn / other / ""
+    citizen / green_card / h1b / h4_ead / opt_ead / other_ead /
+    tn / other / ""
     """
     t = (visa_status or "").strip().lower()
     if not t:
@@ -114,6 +115,8 @@ def status_key(visa_status: str) -> str:
         return "opt_ead"
     if "h1b" in t or "h-1b" in t or "h 1b" in t:
         return "h1b"
+    if "h4" in t or "h-4" in t:
+        return "h4_ead"
     if "ead" in t:
         return "other_ead"
     if re.search(r"\btn\b", t):
@@ -132,6 +135,7 @@ _ALLOWED = {
     "opt_ead": {SPONSORSHIP_OK},
     "tn": {SPONSORSHIP_OK},
     # an EAD holder who needs no sponsorship (H4/L2/GC EAD, ...)
+    "h4_ead": {NO_SPONSORSHIP, SPONSORSHIP_OK},
     "other_ead": {NO_SPONSORSHIP, SPONSORSHIP_OK},
 }
 

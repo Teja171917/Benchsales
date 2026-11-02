@@ -335,7 +335,7 @@ function consultantModal(c) {
       <label>Phone</label><input type="text" id="m-phone" value="${esc(c.phone || "")}">
       <label>Location</label><input type="text" id="m-location" value="${esc(c.location || "")}" placeholder="Houston, TX">
       <label>Visa status</label><select id="m-visa">${(() => {
-        const opts = ["", "US Citizen", "Green Card", "H1B", "OPT / STEM OPT EAD", "Other EAD", "TN", "Other"];
+        const opts = ["", "US Citizen", "Green Card", "H1B", "H4 EAD", "OPT / STEM OPT EAD", "Other EAD", "TN", "Other"];
         const cur = c.visa_status || "";
         const all = opts.includes(cur) ? opts : [cur, ...opts];
         return all.map((o) => `<option value="${esc(o)}"${o === cur ? " selected" : ""}>${o === "" ? "Not set" : esc(o)}</option>`).join("");
