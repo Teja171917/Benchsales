@@ -374,6 +374,20 @@ def _caller_admin(request: Request) -> bool:
                 or accounts.any_users())
 
 
+def _actor(request: Request) -> str:
+    """Who is performing this request, for the activity log: a signed-in
+    user's email, a shared company login's workspace, or 'system'."""
+    user = getattr(request.state, "user", None)
+    if user:
+        return user.get("email") or "user"
+    basic = getattr(request.state, "basic_target", _NO_BASIC)
+    if basic is not _NO_BASIC:
+        if basic is None:
+            return "shared login (main)"
+        return f"shared login ({accounts._slug_for_path(basic)})"
+    return "system"
+
+
 def _admin_scope(request: Request) -> set:
     """Workspace slugs the caller may manage users for: a session admin
     manages their own workspace; the legacy main login manages all; a
@@ -426,6 +440,10 @@ async def admin_create_user(request: Request):
             company_slug=_slug_to_company(slug))
     except ValueError as e:
         raise HTTPException(400, str(e))
+    db.log_activity(
+        "action",
+        f"Account created: {user['email']} ({user['role']}) in "
+        f"{slug}", actor=_actor(request))
     return {"ok": True, "user": {**_public_user(user), "id": user["id"],
                                  "active": user["active"]}}
 
@@ -458,6 +476,14 @@ async def admin_set_active(request: Request, user_id: int):
     return {"ok": True}
 
 
+@app.get("/api/activity")
+def api_activity(request: Request, limit: int = 50):
+    """This workspace's activity log (actions + errors) — admins only,
+    same wall as the feedback board."""
+    _require_admin(request)
+    return {"events": db.list_activity(limit=max(1, min(limit, 200)))}
+
+
 @app.post("/api/admin/users/{user_id}/approve")
 async def admin_approve_user(request: Request, user_id: int):
     """Approve a pending signup in the caller's workspace scope."""
@@ -470,6 +496,10 @@ async def admin_approve_user(request: Request, user_id: int):
         user = accounts.approve_user(user_id, body.get("role") or "member")
     except ValueError as e:
         raise HTTPException(400, str(e))
+    db.log_activity(
+        "action",
+        f"Signup approved: {user['email']} as {user['role']} in "
+        f"{target.get('company_slug') or 'main'}", actor=_actor(request))
     return {"ok": True, "user": {**_public_user(user), "id": user["id"],
                                  "active": user["active"],
                                  "pending": user["pending"]}}
@@ -529,6 +559,16 @@ def _do_collect() -> dict:
                "rescored": part.get("rescored", 0),
                "queries": part.get("queries", [])}
         for path, part in (summary.get("per_db") or {}).items()}
+    for path, part in (summary.get("per_db") or {}).items():
+        with db.use(path):
+            errs = part.get("errors") or []
+            db.log_activity(
+                "error" if errs else "action",
+                f"Job collection: {summary.get('jobs_new', 0)} new jobs "
+                f"in the pool, {part.get('matches_new', 0)} new matches "
+                "in this workspace",
+                actor="system",
+                detail="; ".join(str(e) for e in errs[:3]))
     return summary
 
 
@@ -1313,7 +1353,12 @@ def api_create_cover_letter(mid: int):
            "description": m.get("job_description") or ""}
     text, made_by = coverletter_mod.generate(
         consultant or {}, job, base_text, db.get_settings())
-    return db.save_cover_letter(mid, text, made_by)
+    out = db.save_cover_letter(mid, text, made_by)
+    db.log_activity(
+        "action",
+        f"Cover letter for {(consultant or {}).get('name', 'a consultant')}"
+        f" — {m.get('job_title', '')} at {m.get('company', '')} ({made_by})")
+    return out
 
 
 @app.post("/api/matches/{mid}/apply-plan")
@@ -1323,7 +1368,15 @@ def api_apply_plan(mid: int):
     m = db.get_match(mid)
     if not m:
         raise HTTPException(404, "match not found")
-    return applyfill_mod.build_fill_plan(m)
+    plan = applyfill_mod.build_fill_plan(m)
+    db.log_activity(
+        "action" if plan.get("verdict") == "ready" else "error",
+        f"Apply plan for {m.get('consultant_name', 'a consultant')} — "
+        f"{m.get('job_title', '')} at {m.get('company', '')}: "
+        f"posting {plan.get('liveness', 'unknown')}, "
+        f"verdict {plan.get('verdict', 'unknown')}",
+        detail="; ".join(plan.get("blockers") or []))
+    return plan
 
 
 @app.get("/api/matches/{mid}/cover-letter")
@@ -1350,14 +1403,31 @@ def api_get_match(mid: int):
 
 
 @app.post("/api/matches/{mid}/tailor")
-def api_tailor(mid: int):
+def api_tailor(mid: int, request: Request):
     m = db.get_match(mid)
     if not m:
         raise HTTPException(404, "match not found")
     settings = db.get_settings()
-    result = tailor_mod.tailor_match(m, settings)
+    try:
+        result = tailor_mod.tailor_match(m, settings)
+    except Exception as exc:
+        db.log_activity(
+            "error",
+            f"Tailor failed for {m.get('consultant_name', 'a consultant')}"
+            f" — {m.get('job_title', '')} at {m.get('company', '')}",
+            actor=_actor(request),
+            detail=f"{type(exc).__name__}: {exc}")
+        raise
     tid = db.insert_tailored(mid, result["text"], result["tailored_by"],
                              result["added_skills_flagged"])
+    db.log_activity(
+        "action",
+        f"Tailored {m.get('consultant_name', 'a consultant')}'s resume "
+        f"for {m.get('job_title', '')} at {m.get('company', '')} "
+        f"({result['tailored_by']})",
+        actor=_actor(request),
+        detail=("keyword tailoring — the workspace AI key is missing or "
+                "not working" if result["tailored_by"] != "llm" else ""))
     demand = market.demand_map()
     missing = [{"skill": s, "in_demand": s in demand,
                 "demand_jobs": demand.get(s, 0)}
@@ -1396,6 +1466,11 @@ def api_tailored_add_skills(tid: int, data: dict):
     new_text = tailor_mod.add_skills_to_text(
         t["tailored_text"], [display_name(s) for s in clean])
     updated = db.update_tailored(tid, new_text, clean)
+    db.log_activity(
+        "action",
+        f"Confirmed skills added to a tailored resume for "
+        f"{(m or {}).get('consultant_name', 'a consultant')}: "
+        + ", ".join(clean))
     return {"id": tid, "added": clean,
             "user_confirmed_skills": updated["user_confirmed_skills"],
             "added_skills_flagged": updated["added_skills_flagged"]}
@@ -1421,11 +1496,18 @@ def api_get_tailored(tid: int):
 
 
 @app.post("/api/matches/{mid}/queue")
-def api_queue(mid: int, data: dict | None = None):
-    if not db.get_match(mid):
+def api_queue(mid: int, request: Request, data: dict | None = None):
+    m = db.get_match(mid)
+    if not m:
         raise HTTPException(404, "match not found")
     tid = (data or {}).get("tailored_resume_id")
-    return db.queue_application(mid, tid)
+    out = db.queue_application(mid, tid)
+    db.log_activity(
+        "action",
+        f"Queued {m.get('consultant_name', 'a consultant')} for "
+        f"{m.get('job_title', '')} at {m.get('company', '')}",
+        actor=_actor(request))
+    return out
 
 
 # ---------- applications ----------

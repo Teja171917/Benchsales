@@ -186,6 +186,14 @@ CREATE TABLE IF NOT EXISTS api_usage (
     hits INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (day, source)
 );
+CREATE TABLE IF NOT EXISTS activity_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL DEFAULT 'action',
+    actor TEXT DEFAULT '',
+    summary TEXT NOT NULL,
+    detail TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -811,6 +819,44 @@ def set_feedback_status(fid: int, status: str) -> bool:
         cur = conn.execute("UPDATE feedback SET status=? WHERE id=?",
                            (status, fid))
         return cur.rowcount > 0
+
+
+# ---- activity log (per workspace: this DB file belongs to one
+# workspace, so its events are private to that workspace) ----
+def log_activity(kind: str, summary: str, actor: str = "",
+                 detail: str = "") -> None:
+    """Record something that happened in this workspace — an action or
+    an error — so the team (and the assistant) can see it later.
+    Logging must never break the action itself: failures are silent."""
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO activity_events(kind, actor, summary, detail,"
+                " created_at) VALUES (?, ?, ?, ?, ?)",
+                (kind, actor or "", str(summary)[:300],
+                 str(detail)[:1000], now_iso()))
+            conn.execute(
+                "DELETE FROM activity_events WHERE id NOT IN "
+                "(SELECT id FROM activity_events ORDER BY id DESC"
+                " LIMIT 500)")
+    except Exception:
+        pass
+
+
+def list_activity(limit: int = 20, kind: str | None = None) -> list:
+    try:
+        with get_conn() as conn:
+            if kind:
+                rows = conn.execute(
+                    "SELECT * FROM activity_events WHERE kind = ?"
+                    " ORDER BY id DESC LIMIT ?", (kind, limit))
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM activity_events ORDER BY id DESC"
+                    " LIMIT ?", (limit,))
+            return [dict(r) for r in rows]
+    except Exception:
+        return []
 
 
 def matches_summary(top_n: int = 8) -> dict:

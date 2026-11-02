@@ -38,6 +38,9 @@ Rules:
   the names and numbers from the data exactly as written.
 - This workspace's data is private to this company. Never mention other
   companies or workspaces.
+- The RECENT ACTIVITY section is this workspace's own log of actions
+  and errors. For questions about what happened, what failed, or who
+  did something, answer from it and quote its times and details.
 """
 
 APP_GUIDE = """APP GUIDE:
@@ -128,6 +131,20 @@ def build_snapshot() -> str:
     lines.append(f"Match threshold: {settings.get('match_threshold', '60')}")
     lines.append("Auto-queue tailored matches: "
                  + ("on" if settings.get("auto_queue_tailored") == "1" else "off"))
+    events = db.list_activity(limit=12)
+    if events:
+        lines.append("RECENT ACTIVITY IN THIS WORKSPACE (newest first — "
+                     "actions and errors recorded as they happened; use "
+                     "it for 'what happened', error and who-did-what "
+                     "questions):")
+        for e in events:
+            line = (f"- [{(e.get('created_at') or '')[:16].replace('T', ' ')}] "
+                    f"[{e.get('kind', 'action')}] {e.get('summary', '')}")
+            if e.get("actor"):
+                line += f" (by {e['actor']})"
+            if e.get("detail"):
+                line += f" — {e['detail']}"
+            lines.append(line)
     return "\n".join(lines)
 
 
@@ -175,10 +192,24 @@ _QUEUE_WORDS = re.compile(r"\bqueue\b", re.I)
 
 def _run_tailor(match: dict) -> dict:
     """The same tailor run the Tailor screen performs."""
-    result = tailor_mod.tailor_match(match, db.get_settings())
+    try:
+        result = tailor_mod.tailor_match(match, db.get_settings())
+    except Exception as exc:
+        db.log_activity(
+            "error",
+            f"Tailor failed for {match.get('consultant_name', 'a consultant')}"
+            f" — {match.get('job_title', '')} at {match.get('company', '')}",
+            actor="assistant", detail=f"{type(exc).__name__}: {exc}")
+        raise
     tid = db.insert_tailored(match["id"], result["text"],
                              result["tailored_by"],
                              result["added_skills_flagged"])
+    db.log_activity(
+        "action",
+        f"Tailored {match.get('consultant_name', 'a consultant')}'s resume"
+        f" for {match.get('job_title', '')} at {match.get('company', '')}"
+        f" ({result['tailored_by']})",
+        actor="assistant")
     return {"id": tid, "tailored_by": result["tailored_by"],
             "added_skills_flagged": result["added_skills_flagged"]}
 
@@ -429,6 +460,12 @@ def _try_action(message: str, actor: str) -> dict | None:
     if _QUEUE_WORDS.search(text) and key in _last_action:
         last = _last_action.pop(key)
         db.queue_application(last["match_id"], last["tailored_id"])
+        _qm = db.get_match(last["match_id"]) or {}
+        db.log_activity(
+            "action",
+            f"Queued {_qm.get('consultant_name', 'a consultant')} for "
+            f"{_qm.get('job_title', '')} at {_qm.get('company', '')}",
+            actor="assistant")
         return {"reply":
                 f"Queued — {last['consultant_name']} for "
                 f"{last['job_title']} at {last['company']} is now in the "
@@ -498,6 +535,46 @@ def _try_action(message: str, actor: str) -> dict | None:
     return None
 
 
+_ACTIVITY_WORDS = re.compile(
+    r"\b(errors?|failed|failing|failure|activity|what happened|"
+    r"recent events|history)\b", re.I)
+
+
+def _activity_reply(message: str) -> str:
+    """Answer 'what happened / any errors?' straight from this
+    workspace's activity log — no model needed, so it works even when
+    the workspace's AI is off or unreachable."""
+    wants_errors = bool(re.search(r"\berrors?\b|\bfailed\b|\bfailure\b",
+                                  message, re.I))
+    errors = db.list_activity(limit=8, kind="error")
+    events = db.list_activity(limit=10)
+    if not events and not errors:
+        return ("Nothing is in this workspace's activity log yet. "
+                "Tailoring, queueing, collections and errors will show "
+                "up here as they happen.")
+    lines = []
+    if wants_errors:
+        if errors:
+            lines.append("Recent errors in this workspace:")
+            for e in errors:
+                lines.append(
+                    f"- [{(e.get('created_at') or '')[:16].replace('T', ' ')}] "
+                    f"{e.get('summary', '')}"
+                    + (f" — {e['detail']}" if e.get("detail") else ""))
+        else:
+            lines.append("No errors in the recent activity log.")
+        lines.append("")
+        lines.append("Latest activity:")
+    else:
+        lines.append("Recent activity in this workspace (newest first):")
+    for e in events:
+        lines.append(
+            f"- [{(e.get('created_at') or '')[:16].replace('T', ' ')}] "
+            f"{e.get('summary', '')}"
+            + (f" (by {e['actor']})" if e.get("actor") else ""))
+    return "\n".join(lines)
+
+
 def chat(message: str, history: list | None = None,
          actor: str = "") -> dict:
     """Answer one message, or run a tailor/queue action when asked.
@@ -510,6 +587,9 @@ def chat(message: str, history: list | None = None,
     acted = _try_action(message, actor)
     if acted is not None:
         return acted
+    if _ACTIVITY_WORDS.search(message):
+        return {"reply": _activity_reply(message), "ai": False,
+                "action": None}
     settings = db.get_settings()
     if not (settings.get("llm_base_url") and settings.get("llm_api_key")
             and settings.get("llm_model")):
