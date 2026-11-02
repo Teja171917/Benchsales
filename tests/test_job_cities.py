@@ -40,6 +40,8 @@ class JobCitiesTests(unittest.TestCase):
             ("SRE Role", "Houston, Harris County"),
             ("SRE Role", "Old Sixth Ward, Houston"),
             ("SRE Role", "Manhattan, NY"),
+            ("Dev Role", "Texas, TX"), ("Dev Role", "Washington, DC"),
+            ("Dev Role", "Washington, WA"),
             ("Data Eng", "Remote - Dallas, TX"), ("QA Lead", "Remote"),
             ("QA Lead", "Texas"), ("PM Role", "United States"),
             ("PM Role", ""), ("SRE Role", "New York, NY"),
@@ -68,7 +70,8 @@ class JobCitiesTests(unittest.TestCase):
     def test_cities_cover_the_whole_pool_with_counts(self):
         cities = {c["city"]: c["jobs"] for c in db.job_cities()}
         self.assertEqual(cities, {"Houston": 5, "Austin": 1,
-                                  "Dallas": 1, "New York": 3})
+                                  "Dallas": 1, "New York": 3,
+                                  "Washington": 1})
         ordered = [c["city"] for c in db.job_cities()]
         self.assertEqual(ordered[0], "Houston")      # busiest first
 
@@ -83,6 +86,9 @@ class JobCitiesTests(unittest.TestCase):
                          "New York")
         self.assertEqual(f("Remote - Dallas, TX", confirmed), "Dallas")
         self.assertEqual(f("Texas", confirmed), "")
+        self.assertEqual(f("Texas, TX", confirmed), "")
+        self.assertEqual(f("Washington, DC", confirmed), "Washington")
+        self.assertEqual(f("Washington, WA", confirmed), "")
         self.assertEqual(f("", confirmed), "")
 
     def test_endpoint(self):

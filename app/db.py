@@ -1059,6 +1059,10 @@ _NOT_CITY_STATES = {"texas", "california", "new york",
 }
 
 
+# state names that are also the city in "City, ST" format
+_STATE_NAME_CITIES = {"new york"}
+
+
 _NYC_BOROUGHS = {"manhattan", "brooklyn", "queens", "bronx",
                 "staten island"}
 
@@ -1093,7 +1097,9 @@ def confirmed_cities() -> set:
     for r in rows:
         parts = _loc_parts(r["location"] or "")
         if len(parts) >= 2 and _is_state(parts[1]):
-            if parts[0].lower() not in _NOT_CITIES:
+            if parts[0].lower() not in _NOT_CITIES \
+                    and (parts[0].lower() not in _NOT_CITY_STATES
+                         or parts[0].lower() in _STATE_NAME_CITIES):
                 out.add(parts[0])
     return out
 
@@ -1116,6 +1122,10 @@ def city_of_location(loc: str, confirmed: set) -> str:
     if first.lower() in _NYC_BOROUGHS or second.lower() in _NYC_BOROUGHS:
         return "New York"
     if _is_state(second):
+        if first.lower() in _NOT_CITY_STATES \
+                and first.lower() not in _STATE_NAME_CITIES \
+                and second.upper() not in ("DC",):
+            return ""
         return first
     if second.lower().endswith(" county"):
         return first if first in confirmed else ""
@@ -1136,7 +1146,9 @@ def job_cities() -> list:
     for loc in locations:
         parts = _loc_parts(loc)
         if len(parts) >= 2 and _is_state(parts[1]):
-            if parts[0].lower() not in _NOT_CITIES:
+            if parts[0].lower() not in _NOT_CITIES \
+                    and (parts[0].lower() not in _NOT_CITY_STATES
+                         or parts[0].lower() in _STATE_NAME_CITIES):
                 confirmed.add(parts[0])
     counts: dict = {}
     for loc in locations:
