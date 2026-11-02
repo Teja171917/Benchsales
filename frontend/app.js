@@ -788,9 +788,9 @@ async function loadMatches(force) {
     if (matchFilter.consultant_id) mq.set("consultant_id", matchFilter.consultant_id);
     matchesCache = {key, rows: await api(`/api/matches?${mq}`)};
   }
-  renderMatches();
+  renderMatchCards();
 }
-function renderMatches() {
+function renderMatchCards() {
   const el = $("#mt-list");
   let ms = [...(matchesCache.rows || [])];
   if (matchFilter.source) ms = ms.filter((m) => m.source === matchFilter.source);
@@ -841,7 +841,7 @@ function renderMatches() {
     more.className = "card";
     more.innerHTML = `<button class="btn" id="mt-more" style="width:100%">Show more — ${totalFiltered - matchShowCount} more matches</button>`;
     el.appendChild(more);
-    $("#mt-more").onclick = () => { matchShowCount += 100; renderMatches(); };
+    $("#mt-more").onclick = () => { matchShowCount += 100; renderMatchCards(); };
   }
   $$("[data-tailor]", el).forEach((b) => b.onclick = () => tailorModal(Number(b.dataset.tailor)));
   $$("[data-applyplan]", el).forEach((b) => b.onclick = () => applyPlanModal(Number(b.dataset.applyplan)));
