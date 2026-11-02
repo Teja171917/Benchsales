@@ -78,7 +78,10 @@ class AdminGateTests(unittest.TestCase):
         self.assertFalse(me["is_admin"])
 
     def test_admin_and_shared_login_can_browse(self):
-        self.assertEqual(self.basic.get("/api/jobs", headers=self.admin_h).status_code, 200)
+        # superseded Nov 2: the raw pool became owner-only, so a
+        # workspace admin who is not the owner is refused (the
+        # jobs-gate suite covers the full matrix)
+        self.assertEqual(self.basic.get("/api/jobs", headers=self.admin_h).status_code, 403)
         h = _basic("x", "main-pw")
         self.assertEqual(self.basic.get("/api/jobs", headers=h).status_code,
                          200)

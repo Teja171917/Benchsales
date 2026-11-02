@@ -312,7 +312,8 @@ def auth_me(request: Request):
                 "admin_scope": sorted(scope),
                 "pending_approvals": pending,
                 "is_admin": user.get("role") == "admin",
-                "can_settings": accounts.is_owner_email(user.get("email"))}
+                "can_settings": accounts.is_owner_email(user.get("email")),
+                "can_jobs": accounts.is_owner_email(user.get("email"))}
     basic = getattr(request.state, "basic_target", _NO_BASIC)
     if basic is not _NO_BASIC:
         slug = accounts._slug_for_path(basic)
@@ -321,11 +322,13 @@ def auth_me(request: Request):
                     None if slug == "main" else slug),
                 "admin_scope": sorted(scope),
                 "pending_approvals": pending, "is_admin": True,
-                "can_settings": basic is None}
+                "can_settings": basic is None,
+                "can_jobs": basic is None}
     return {"user": None, "basic_workspace": None, "workspace_users": 0,
             "admin_scope": [], "pending_approvals": 0,
             "is_admin": _caller_admin(request),
-            "can_settings": _can_settings(request)}
+            "can_settings": _can_settings(request),
+            "can_jobs": _owner_only(request)}
 
 
 @app.get("/api/auth/google/login")
@@ -1046,7 +1049,8 @@ def api_import_run():
 
 
 @app.post("/api/collect/kick")
-def api_collect_kick():
+def api_collect_kick(request: Request):
+    _require_owner(request)
     return {"started": _kick_collect()}
 
 
@@ -1064,7 +1068,7 @@ def api_list_jobs(request: Request, source: str = "", q: str = "",
     """emp = comma list of full-time/c2c/w2/... tags (OR). Jobs whose type
     could not be detected are hidden when emp is set, unless
     include_unspecified=true."""
-    _require_admin(request)
+    _require_owner(request)
     return db.list_jobs(source=source, q=q, limit=limit,
                         emp=emptype.parse_wanted(emp),
                         include_unspecified=include_unspecified)
@@ -1093,7 +1097,7 @@ def api_portals_check():
 
 @app.post("/api/jobs/import-url")
 def api_import_url(request: Request, data: dict):
-    _require_admin(request)
+    _require_owner(request)
     url = (data.get("url") or "").strip()
     if not url:
         raise HTTPException(400, "url is required")
@@ -1110,7 +1114,8 @@ def api_import_url(request: Request, data: dict):
 
 
 @app.post("/api/collect")
-def api_collect():
+def api_collect(request: Request):
+    _require_owner(request)
     return _do_collect()
 
 
@@ -1140,7 +1145,7 @@ def api_live_search(request: Request, data: dict):
     Returns listings without saving them; the frontend saves explicitly
     via /api/jobs/save-live.
     """
-    _require_admin(request)
+    _require_owner(request)
     title = (data.get("title") or "").strip()
     if not title:
         raise HTTPException(400, "title is required")
@@ -1276,7 +1281,7 @@ def mix_sources(jobs: list, key) -> list:
 @app.post("/api/jobs/save-live")
 def api_save_live(request: Request, data: dict):
     """Save live-search listings into the job board (dedupes) and re-run matching."""
-    _require_admin(request)
+    _require_owner(request)
     jobs = data.get("jobs") or []
     if not isinstance(jobs, list) or not jobs:
         raise HTTPException(400, "jobs list is required")
@@ -1552,11 +1557,11 @@ def _mask(key: str, value: str) -> str:
     return value
 
 
-def _can_settings(request: Request) -> bool:
-    """Settings (API keys, sources, thresholds) are owner-only: the
-    owner's own account, or the legacy main shared login — which is
-    also the owner. Company logins, company admins and all members
-    are excluded, in every workspace. With no auth configured at all
+def _owner_only(request: Request) -> bool:
+    """Owner-only surfaces (Settings, the raw job pool): the owner's
+    own account, or the legacy main shared login — which is also the
+    owner. Company logins, company admins and all members are
+    excluded, in every workspace. With no auth configured at all
     (local dev) everything is open, as elsewhere."""
     user = getattr(request.state, "user", None)
     if user:
@@ -1568,10 +1573,20 @@ def _can_settings(request: Request) -> bool:
                 or accounts.any_users())
 
 
+def _can_settings(request: Request) -> bool:
+    return _owner_only(request)
+
+
 def _require_settings(request: Request) -> None:
     if not _can_settings(request):
         raise HTTPException(
             403, "settings are restricted to the owner account")
+
+
+def _require_owner(request: Request) -> None:
+    if not _owner_only(request):
+        raise HTTPException(
+            403, "the job pool is restricted to the owner account")
 
 
 def _settings_view() -> dict:

@@ -28,6 +28,10 @@ async function loadMe() {
     const b = $('#tabs button[data-tab="settings"]');
     if (b) b.style.display = "none";
   }
+  if (ME && ME.can_jobs === false) {
+    const b = $('#tabs button[data-tab="jobs"]');
+    if (b) b.style.display = "none";
+  }
   return ME;
 }
 function ago(iso) {
@@ -426,9 +430,9 @@ let jobsCache = [];
 async function renderJobs() {
   const el = $("#tab-jobs");
   if (!ME) await loadMe();
-  if (ME && ME.is_admin === false) {
+  if (ME && ME.can_jobs === false) {
     el.innerHTML = `<div class="row spread"><h2>Jobs</h2></div>
-      <div class="card muted">The job pool is kept in the backend — collection keeps running and every posting still flows into Matches. The raw pool is admin-only; ask an admin if you need it for a demo.</div>`;
+      <div class="card muted">The job pool runs in the backend — collection keeps going and every posting still flows into Matches. The raw pool itself is owner-only, so there's nothing to load here.</div>`;
     return;
   }
   el.innerHTML = `
