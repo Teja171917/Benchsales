@@ -49,6 +49,8 @@ ASSET_VERSION = _compute_asset_version()
 SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster, smartrecruiters]
 
 app = FastAPI(title="BenchPilot", version="1.0")
+from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 _ready = set()   # company databases already prepared since start-up

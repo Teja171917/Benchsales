@@ -222,6 +222,14 @@ def create_user(email: str, name: str, password: str, role: str = "member",
     return get_user(user_id)
 
 
+# Signup policy (owner's rules, Nov 2026): personal accounts are
+# Gmail-only and are approved by the main workspace's admin; company
+# accounts must use the company's own email domain and are approved by
+# that company's admin. Every other email domain is blocked for now.
+PERSONAL_DOMAINS = {"gmail.com"}
+COMPANY_EMAIL_DOMAINS = {"rsatech": "rsatech.com"}
+
+
 def request_signup(email: str, name: str, password: str,
                    company_id: str) -> dict:
     """Self-service signup: the person picks their company by ID and the
@@ -239,6 +247,38 @@ def request_signup(email: str, name: str, password: str,
         raise ValueError("that company ID is not recognised — "
                          "check it with your admin, or leave it "
                          "blank for a personal account")
+    domain = (email or "").strip().lower().rsplit("@", 1)[-1]
+    if domain in PERSONAL_DOMAINS:
+        if slug != "main":
+            raise ValueError(
+                "a Gmail address is a personal signup — leave the "
+                "Company ID blank. Company members sign up with their "
+                "company email instead.")
+        target = "main"
+    elif domain in COMPANY_EMAIL_DOMAINS.values():
+        owner = next(k for k, v in COMPANY_EMAIL_DOMAINS.items()
+                     if v == domain)
+        if slug == owner or (slug == "main" and not raw):
+            target = owner
+        else:
+            raise ValueError(
+                "that is a company email — sign up with company ID "
+                + owner + " so your own company admin approves you")
+    elif slug != "main":
+        want = COMPANY_EMAIL_DOMAINS.get(slug)
+        if want:
+            raise ValueError(
+                slug + " signups need a company email (@" + want + ") "
+                "— personal Gmail accounts leave the Company ID blank")
+        raise ValueError(
+            "signups for that company are not open yet — personal "
+            "accounts need a Gmail address")
+    else:
+        raise ValueError(
+            "signups are limited for now: personal accounts need a "
+            "Gmail address, and company accounts need their company "
+            "email (RSATECH uses @rsatech.com)")
+    slug = target
     return create_user(email=email, name=name, password=password,
                        role="member",
                        company_slug=None if slug == "main" else slug,

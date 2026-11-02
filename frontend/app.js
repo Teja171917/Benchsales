@@ -691,6 +691,11 @@ async function runCollection() {
 /* ================= MATCHES ================= */
 let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best",
   emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: ""};
+// the matches list is fetched ONCE per consultant/threshold choice and
+// kept here: city / sort / work-type / source clicks then filter this
+// copy instantly instead of re-downloading the whole list every time
+let matchesCache = {key: null, rows: null};
+let matchShowCount = 100;
 function cityOf(m) {
   if (m.city !== undefined && m.city !== null) return m.city;
   let loc = (m.location || "").trim();
@@ -769,16 +774,25 @@ async function renderMatches() {
   $("#mt-sort").onchange = () => { matchFilter.sort = $("#mt-sort").value; loadMatches(); };
   $$("input[name='mt-work']").forEach((r) => { r.onchange = () => {
     matchFilter.work = r.value; loadMatches(); }; });
-  loadMatches();
+  loadMatches(true);
 }
-async function loadMatches() {
+async function loadMatches(force) {
+  matchShowCount = 100;
+  const key = `${matchFilter.consultant_id}|${matchFilter.min_score || 0}`;
+  if (force || !matchesCache.rows || matchesCache.key !== key) {
+    const el = $("#mt-list");
+    el.innerHTML = skelCards(6);
+    // only send consultant_id when one is chosen: an empty "consultant_id="
+    // is not a valid integer and strict API validation would reject it
+    const mq = new URLSearchParams({min_score: String(matchFilter.min_score || 0)});
+    if (matchFilter.consultant_id) mq.set("consultant_id", matchFilter.consultant_id);
+    matchesCache = {key, rows: await api(`/api/matches?${mq}`)};
+  }
+  renderMatches();
+}
+function renderMatches() {
   const el = $("#mt-list");
-  el.innerHTML = skelCards(6);
-  // only send consultant_id when one is chosen: an empty "consultant_id=" is
-  // not a valid integer and strict API validation would reject it
-  const mq = new URLSearchParams({min_score: String(matchFilter.min_score || 0)});
-  if (matchFilter.consultant_id) mq.set("consultant_id", matchFilter.consultant_id);
-  let ms = await api(`/api/matches?${mq}`);
+  let ms = [...(matchesCache.rows || [])];
   if (matchFilter.source) ms = ms.filter((m) => m.source === matchFilter.source);
   const total = ms.length;
   ms = ms.filter((m) => empPasses(m.emp_tags, matchFilter.emp, matchFilter.unspec));
@@ -791,7 +805,8 @@ async function loadMatches() {
   const cnt = $("#mt-count");
   if (cnt) cnt.textContent = ms.length === total ? `${ms.length} matches`
     : `Showing ${ms.length} of ${total} matches`;
-  el.innerHTML = ms.map((m) => `
+  const totalFiltered = ms.length;
+  el.innerHTML = ms.slice(0, matchShowCount).map((m) => `
     <div class="card">
       <div class="row spread">
         <div><b>${esc(m.job_title)}</b><div class="muted">${esc(m.company)}${m.salary ? ` · 💰 ${esc(m.salary)}` : ""}${m.posted_at ? ` · 📅 posted ${esc(ago(m.posted_at))}` : ""}</div>
@@ -821,6 +836,13 @@ async function loadMatches() {
     </div>`).join("") || `<div class="card muted">${(matchFilter.city || matchFilter.work)
       ? "No matches with this city / work-type selection — try All cities or a different work type."
       : "No matches at this threshold. Run a job collection first, or lower the match threshold in Settings."}</div>`;
+  if (totalFiltered > matchShowCount) {
+    const more = document.createElement("div");
+    more.className = "card";
+    more.innerHTML = `<button class="btn" id="mt-more" style="width:100%">Show more — ${totalFiltered - matchShowCount} more matches</button>`;
+    el.appendChild(more);
+    $("#mt-more").onclick = () => { matchShowCount += 100; renderMatches(); };
+  }
   $$("[data-tailor]", el).forEach((b) => b.onclick = () => tailorModal(Number(b.dataset.tailor)));
   $$("[data-applyplan]", el).forEach((b) => b.onclick = () => applyPlanModal(Number(b.dataset.applyplan)));
   $$("[data-queue]", el).forEach((b) => b.onclick = async () => {

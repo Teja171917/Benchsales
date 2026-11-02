@@ -33,6 +33,10 @@ class SignupRoutingTests(unittest.TestCase):
         os.environ["BENCHPILOT_COMPANIES"] = json.dumps(
             {"Acme Staffing": {"username": "acme", "password": "acme-pw"}})
         os.environ["BENCHPILOT_PASSWORD"] = "main-pw"
+        # the signup policy only opens companies with a configured
+        # email domain; give the test company one
+        self._old_domains = accounts.COMPANY_EMAIL_DOMAINS
+        accounts.COMPANY_EMAIL_DOMAINS = {"acme_staffing": "acme.com"}
         os.environ.pop("BENCHPILOT_USERNAME", None)
         from fastapi.testclient import TestClient
         from app import server
@@ -41,6 +45,7 @@ class SignupRoutingTests(unittest.TestCase):
 
     def tearDown(self):
         db.DB_PATH, accounts.ACCOUNTS_PATH = self._old_db, self._old_acc
+        accounts.COMPANY_EMAIL_DOMAINS = self._old_domains
         accounts._ready = False
         for k, v in self._old_env.items():
             if v is None:
