@@ -83,6 +83,19 @@ APP_GUIDE = """APP GUIDE:
 """
 
 
+def _ct(iso: str) -> str:
+    """Activity timestamps are stored in UTC; show them in Central
+    time, the team's timezone."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        dt = datetime.fromisoformat((iso or "").replace("Z", "+00:00"))
+        return dt.astimezone(ZoneInfo("America/Chicago")).strftime(
+            "%b %d, %I:%M %p CT")
+    except Exception:
+        return (iso or "")[:16].replace("T", " ")
+
+
 def build_snapshot() -> str:
     """A compact text picture of this workspace, small enough to ride in
     every chat prompt."""
@@ -138,7 +151,7 @@ def build_snapshot() -> str:
                      "it for 'what happened', error and who-did-what "
                      "questions):")
         for e in events:
-            line = (f"- [{(e.get('created_at') or '')[:16].replace('T', ' ')}] "
+            line = (f"- [{_ct(e.get('created_at') or '')}] "
                     f"[{e.get('kind', 'action')}] {e.get('summary', '')}")
             if e.get("actor"):
                 line += f" (by {e['actor']})"
@@ -558,7 +571,7 @@ def _activity_reply(message: str) -> str:
             lines.append("Recent errors in this workspace:")
             for e in errors:
                 lines.append(
-                    f"- [{(e.get('created_at') or '')[:16].replace('T', ' ')}] "
+                    f"- [{_ct(e.get('created_at') or '')}] "
                     f"{e.get('summary', '')}"
                     + (f" — {e['detail']}" if e.get("detail") else ""))
         else:
@@ -569,7 +582,7 @@ def _activity_reply(message: str) -> str:
         lines.append("Recent activity in this workspace (newest first):")
     for e in events:
         lines.append(
-            f"- [{(e.get('created_at') or '')[:16].replace('T', ' ')}] "
+            f"- [{_ct(e.get('created_at') or '')}] "
             f"{e.get('summary', '')}"
             + (f" (by {e['actor']})" if e.get("actor") else ""))
     return "\n".join(lines)
