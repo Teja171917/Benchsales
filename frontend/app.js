@@ -760,6 +760,13 @@ async function renderMatches() {
   $("#mt-src").innerHTML = `<option value="">All sources</option>` +
     srcs.filter((s) => s.name !== "urlimport")
       .map((s) => `<option value="${s.name}"${matchFilter.source === s.name ? " selected" : ""}>${esc(s.label)}</option>`).join("");
+  // the City dropdown is filled HERE, by the Matches view itself —
+  // it used to be filled as a side effect of loading the Jobs view,
+  // so it stayed empty unless Jobs happened to load at the right time
+  const cities = await api("/api/jobs/cities").catch(() => []);
+  if (matchFilter.city && !cities.some((c) => c.city === matchFilter.city)) matchFilter.city = "";
+  $("#mt-city").innerHTML = `<option value="">All cities</option>` +
+    cities.map((c) => `<option value="${esc(c.city)}"${matchFilter.city === c.city ? " selected" : ""}>${esc(c.city)} (${c.jobs})</option>`).join("");
   $("#mt-go").onclick = () => {
     matchFilter.consultant_id = $("#mt-c").value;
     matchFilter.min_score = Number($("#mt-s").value) || 0;

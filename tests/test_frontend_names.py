@@ -17,6 +17,13 @@ class FrontendNameTests(unittest.TestCase):
         dupes = {n for n in names if names.count(n) > 1}
         self.assertEqual(dupes, set(), f"duplicate definitions: {dupes}")
 
+    def test_matches_view_fills_its_own_city_dropdown(self):
+        src = APP_JS.read_text()
+        view = src.split("async function renderMatches(")[1].split(
+            "async function loadMatches(")[0]
+        self.assertIn('api("/api/jobs/cities")', view)
+        self.assertIn('$("#mt-city").innerHTML', view)
+
     def test_matches_view_and_cards_are_distinct(self):
         src = APP_JS.read_text()
         self.assertEqual(len(re.findall(r"function renderMatches\(", src)), 1)
