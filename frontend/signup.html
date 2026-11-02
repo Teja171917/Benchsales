@@ -29,7 +29,7 @@
 <body>
 <div class="card">
   <h1>BenchPilot</h1>
-  <p class="sub">Create your account. Your company admin approves new signups before you can sign in.</p>
+  <p class="sub">Create your account. An admin approves new signups before you can sign in.</p>
   <div class="err" id="err"></div>
   <div class="ok" id="ok"></div>
   <form id="f">
@@ -39,10 +39,10 @@
     <input id="email" type="email" autocomplete="email" required>
     <label for="password">Password (8+ characters)</label>
     <input id="password" type="password" autocomplete="new-password" required>
-    <label for="company">Company ID</label>
-    <input id="company" type="text" list="companies" autocomplete="off" required>
+    <label for="company">Company ID (optional)</label>
+    <input id="company" type="text" list="companies" autocomplete="off">
     <datalist id="companies"></datalist>
-    <p class="hint">Your admin gives you this — for example <b>rsatech</b>. It decides which company's workspace your account joins.</p>
+    <p class="hint">Joining a company? Enter its ID — for example <b>rsatech</b> — and that company's admin approves you. Leave it blank for a personal account: the main admin approves those.</p>
     <button class="main" type="submit">Request account</button>
   </form>
   <p style="margin:18px 0 0; font-size:13px; color:#93a4bd; text-align:center">
@@ -71,7 +71,7 @@
           document.getElementById('f').style.display = 'none';
           var ok = document.getElementById('ok');
           ok.style.display = 'block';
-          ok.textContent = 'Account requested. Your company admin will approve it — once they do, sign in with this email and password.';
+          ok.textContent = 'Account requested. An admin will approve it — once they do, sign in with this email and password.';
         } else { showErr(d.detail || 'Signup failed.'); }
       });
     }).catch(function () { showErr('Could not reach the server.'); });

@@ -230,10 +230,15 @@ def request_signup(email: str, name: str, password: str,
         raise ValueError("enter your name")
     if not password:
         raise ValueError("set a password (8+ characters)")
-    slug = slugify(company_id or "")
-    if not slug or slug not in workspace_slugs():
+    raw = (company_id or "").strip()
+    # no company ID = a personal signup: it joins the main workspace,
+    # whose admin (the owner) approves it. A company ID routes the
+    # approval to that company's own admin instead.
+    slug = slugify(raw) if raw else "main"
+    if slug not in workspace_slugs():
         raise ValueError("that company ID is not recognised — "
-                         "check it with your admin")
+                         "check it with your admin, or leave it "
+                         "blank for a personal account")
     return create_user(email=email, name=name, password=password,
                        role="member",
                        company_slug=None if slug == "main" else slug,
