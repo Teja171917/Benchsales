@@ -692,9 +692,19 @@ async function runCollection() {
 let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best",
   emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: ""};
 function cityOf(m) {
+  if (m.city !== undefined && m.city !== null) return m.city;
   let loc = (m.location || "").trim();
   if (/^remote\s*-\s*/i.test(loc)) loc = loc.replace(/^remote\s*-\s*/i, "");
-  return loc ? loc.split(",")[0].trim() : "";
+  if (!loc) return "";
+  const parts = loc.split(",").map((x) => x.trim());
+  if (parts.length >= 2) {
+    // "Locality, Harris County" is a district, not a city (matches the
+    // backend's city list); NYC boroughs mean New York
+    if (/ county$/i.test(parts[1])) return "";
+    if (["manhattan", "brooklyn", "queens", "bronx", "staten island"]
+        .includes(parts[1].toLowerCase())) return "New York";
+  }
+  return parts[0];
 }
 function workTypeOf(m) {
   if (m.remote_flag) return "remote";

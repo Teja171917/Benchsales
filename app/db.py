@@ -1059,6 +1059,71 @@ _NOT_CITY_STATES = {"texas", "california", "new york",
 }
 
 
+_NYC_BOROUGHS = {"manhattan", "brooklyn", "queens", "bronx",
+                "staten island"}
+
+
+_US_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA",
+    "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY",
+    "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX",
+    "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+}
+
+
+def _is_state(segment: str) -> bool:
+    return (segment.upper() in _US_STATE_CODES
+            or segment.lower() in _NOT_CITY_STATES)
+
+
+def _loc_parts(loc: str) -> list:
+    loc = (loc or "").strip()
+    if loc.lower().startswith("remote - "):
+        loc = loc[len("Remote - "):].strip()
+    return [x.strip() for x in loc.split(",") if x.strip()]
+
+
+def confirmed_cities() -> set:
+    """City names the pool itself proves are cities: any first segment
+    that appears with a state after it ("Houston, TX")."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT location FROM jobs").fetchall()
+    out = set()
+    for r in rows:
+        parts = _loc_parts(r["location"] or "")
+        if len(parts) >= 2 and _is_state(parts[1]):
+            if parts[0].lower() not in _NOT_CITIES:
+                out.add(parts[0])
+    return out
+
+
+def city_of_location(loc: str, confirmed: set) -> str:
+    """The city a job belongs to, or "" when its location names no
+    city. Boards format locations several ways: "City, ST" (the city
+    is first), "City, Harris County" and "District, City" (Adzuna
+    hierarchies — resolved against the pool's own confirmed cities),
+    and NYC boroughs, which mean New York."""
+    parts = _loc_parts(loc)
+    if not parts:
+        return ""
+    first = parts[0]
+    if first.lower() in _NOT_CITIES:
+        return ""
+    if len(parts) == 1:
+        return "" if first.lower() in _NOT_CITY_STATES else first
+    second = parts[1]
+    if first.lower() in _NYC_BOROUGHS or second.lower() in _NYC_BOROUGHS:
+        return "New York"
+    if _is_state(second):
+        return first
+    if second.lower().endswith(" county"):
+        return first if first in confirmed else ""
+    if second in confirmed and first not in confirmed:
+        return second
+    return first
+
+
 def job_cities() -> list:
     """Every US city in the job pool, with its live job count — the
     Matches city filter is built from this, so the team sees the whole
@@ -1066,18 +1131,17 @@ def job_cities() -> list:
     Sorted by job count (busiest first), then A-Z."""
     with get_conn() as conn:
         rows = conn.execute("SELECT location FROM jobs").fetchall()
+    locations = [r["location"] or "" for r in rows]
+    confirmed = set()
+    for loc in locations:
+        parts = _loc_parts(loc)
+        if len(parts) >= 2 and _is_state(parts[1]):
+            if parts[0].lower() not in _NOT_CITIES:
+                confirmed.add(parts[0])
     counts: dict = {}
-    for r in rows:
-        loc = (r["location"] or "").strip()
-        if not loc:
-            continue
-        city = loc.split(",")[0].strip()
-        if city.lower().startswith("remote - "):
-            city = city[len("Remote - "):].strip()
-        if not city or city.lower() in _NOT_CITIES:
-            continue
-        if "," not in loc and city.lower() in _NOT_CITY_STATES:
-            continue     # the whole location is just a state name
-        counts[city] = counts.get(city, 0) + 1
+    for loc in locations:
+        city = city_of_location(loc, confirmed)
+        if city:
+            counts[city] = counts.get(city, 0) + 1
     return [{"city": c, "jobs": n} for c, n in
             sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]

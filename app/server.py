@@ -1238,7 +1238,11 @@ def api_save_live(request: Request, data: dict):
 # ---------- matches ----------
 @app.get("/api/matches")
 def api_list_matches(consultant_id: int = 0, min_score: float = 0):
-    return db.list_matches(consultant_id or None, min_score)
+    rows = db.list_matches(consultant_id or None, min_score)
+    confirmed = db.confirmed_cities()
+    for m in rows:
+        m["city"] = db.city_of_location(m.get("location") or "", confirmed)
+    return rows
 
 
 @app.post("/api/feedback")
