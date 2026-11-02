@@ -808,20 +808,6 @@ async function renderMatches() {
       <label class="fcheck"><input type="checkbox" id="mt-unspec"${matchFilter.unspec ? " checked" : ""}> include jobs with no type listed</label></div></div>
     <div id="mt-count" class="muted" style="margin:0 2px 8px"></div>
     <div id="mt-list" class="grid"></div>`;
-  const cs = await api("/api/consultants");
-  $("#mt-c").innerHTML = `<option value="">All consultants</option>` +
-    cs.map((c) => `<option value="${c.id}"${String(c.id) === String(matchFilter.consultant_id) ? " selected" : ""}>${esc(c.name)}</option>`).join("");
-  const srcs = await api("/api/sources/status");
-  $("#mt-src").innerHTML = `<option value="">All sources</option>` +
-    srcs.filter((s) => s.name !== "urlimport")
-      .map((s) => `<option value="${s.name}"${matchFilter.source === s.name ? " selected" : ""}>${esc(s.label)}</option>`).join("");
-  // the City dropdown is filled HERE, by the Matches view itself —
-  // it used to be filled as a side effect of loading the Jobs view,
-  // so it stayed empty unless Jobs happened to load at the right time
-  const cities = await api("/api/jobs/cities").catch(() => []);
-  if (matchFilter.city && !cities.some((c) => c.city === matchFilter.city)) matchFilter.city = "";
-  $("#mt-city").innerHTML = `<option value="">All cities</option>` +
-    cities.map((c) => `<option value="${esc(c.city)}"${matchFilter.city === c.city ? " selected" : ""}>${esc(c.city)} (${c.jobs})</option>`).join("");
   $("#mt-go").onclick = () => {
     matchFilter.consultant_id = $("#mt-c").value;
     matchFilter.min_score = Number($("#mt-s").value) || 0;
@@ -836,7 +822,29 @@ async function renderMatches() {
   $("#mt-sort").onchange = () => { matchFilter.sort = $("#mt-sort").value; loadMatches(); };
   $("#mt-auth").onchange = () => { matchFilter.auth = $("#mt-auth").value; loadMatches(); };
   bindWorkChips();
+  // The list loads FIRST. Each dropdown then fills on its own below:
+  // sequential awaits here once meant one slow or failing call (a
+  // locked database made /api/consultants 500) killed the handlers,
+  // the list, and every filter after it — the consultant filter
+  // simply never appeared.
   loadMatches(true);
+  api("/api/consultants").then((cs) => {
+    $("#mt-c").innerHTML = `<option value="">All consultants</option>` +
+      cs.map((c) => `<option value="${c.id}"${String(c.id) === String(matchFilter.consultant_id) ? " selected" : ""}>${esc(c.name)}</option>`).join("");
+  }).catch(() => {});
+  api("/api/sources/status").then((srcs) => {
+    $("#mt-src").innerHTML = `<option value="">All sources</option>` +
+      srcs.filter((s) => s.name !== "urlimport")
+        .map((s) => `<option value="${s.name}"${matchFilter.source === s.name ? " selected" : ""}>${esc(s.label)}</option>`).join("");
+  }).catch(() => {});
+  // the City dropdown is filled HERE, by the Matches view itself —
+  // it used to be filled as a side effect of loading the Jobs view,
+  // so it stayed empty unless Jobs happened to load at the right time
+  api("/api/jobs/cities").then((cities) => {
+    if (matchFilter.city && !cities.some((c) => c.city === matchFilter.city)) matchFilter.city = "";
+    $("#mt-city").innerHTML = `<option value="">All cities</option>` +
+      cities.map((c) => `<option value="${esc(c.city)}"${matchFilter.city === c.city ? " selected" : ""}>${esc(c.city)} (${c.jobs})</option>`).join("");
+  }).catch(() => {});
 }
 async function loadMatches(force) {
   matchShowCount = 100;

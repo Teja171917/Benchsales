@@ -161,7 +161,7 @@ def _startup():
             try:
                 with db.use(path):
                     while db.backfill_auth_tags():
-                        pass
+                        time.sleep(0.25)
             except Exception:
                 pass
     threading.Thread(target=_backfill_auth, daemon=True,

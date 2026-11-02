@@ -98,9 +98,18 @@ def _stamp_of(path: Path) -> str:
 def _sig(path: Path):
     try:
         st = path.stat()
-        return (st.st_mtime_ns, st.st_size)
+        sig = (st.st_mtime_ns, st.st_size)
     except OSError:
         return None
+    # WAL mode: fresh writes land in the -wal sibling first, so watch
+    # it too or change detection misses updates between checkpoints.
+    wal = Path(str(path) + "-wal")
+    try:
+        wst = wal.stat()
+        sig = sig + (wst.st_mtime_ns, wst.st_size)
+    except OSError:
+        pass
+    return sig
 
 
 def restore(store=None, path=None) -> bool:
@@ -120,6 +129,13 @@ def restore(store=None, path=None) -> bool:
         local = _stamp_of(local_path) if local_path.exists() else ""
         if not local_path.exists() or (remote and remote > local):
             local_path.parent.mkdir(parents=True, exist_ok=True)
+            # a stale WAL/shm pair from the replaced file must not be
+            # replayed onto the restored snapshot
+            for suffix in ("-wal", "-shm"):
+                try:
+                    os.remove(str(local_path) + suffix)
+                except OSError:
+                    pass
             os.replace(tmp, local_path)
             _state.update(restored=True)
             _last_sig[str(local_path)] = _sig(local_path)

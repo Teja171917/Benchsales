@@ -296,8 +296,16 @@ def _main_conn() -> sqlite3.Connection:
 def get_conn() -> sqlite3.Connection:
     path = current_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    # WAL + a generous busy timeout: background writers (collection,
+    # the auth-tag backfill, the backup stamp) must never make a page
+    # read fail with "database is locked" — readers proceed alongside
+    # a writer, and writers queue instead of erroring. With the old
+    # defaults (rollback journal, no busy timeout) any write lock made
+    # API calls 500, which is what intermittently blanked whole views.
+    conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -786,17 +794,23 @@ def list_matches(consultant_id: int | None = None,
 def backfill_auth_tags(batch: int = 500) -> int:
     """Classify jobs whose auth_tag is still NULL (pre-feature rows).
     Returns how many were filled; '' means the posting states nothing.
-    Idempotent — safe to run until it returns 0."""
+    Idempotent — safe to run until it returns 0.
+
+    The classification runs OUTSIDE any write transaction and the
+    updates commit in small chunks, so the backfill never holds the
+    database write lock for more than a few rows at a time."""
     with get_conn() as conn:
-        rows = conn.execute(
+        rows = [dict(r) for r in conn.execute(
             "SELECT id, title, description FROM jobs "
-            "WHERE auth_tag IS NULL LIMIT ?", (batch,)).fetchall()
-        for r in rows:
-            conn.execute(
+            "WHERE auth_tag IS NULL LIMIT ?", (batch,)).fetchall()]
+    tagged = [(visa.classify_auth(
+        f"{r['title'] or ''}\n{r['description'] or ''}"), r["id"])
+        for r in rows]
+    for i in range(0, len(tagged), 50):
+        with get_conn() as conn:
+            conn.executemany(
                 "UPDATE jobs SET auth_tag=? WHERE id=?",
-                (visa.classify_auth(
-                    f"{r['title'] or ''}\n{r['description'] or ''}"),
-                 r["id"]))
+                tagged[i:i + 50])
     return len(rows)
 
 
