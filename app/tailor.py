@@ -30,6 +30,11 @@ def _llm_tailor(raw_text: str, jd_text: str, settings: dict) -> str | None:
     model = settings.get("llm_model") or ""
     if not (base and key and model):
         return None
+    if len(key) < 20:
+        # a placeholder, not a real provider key (real ones are long):
+        # skip the call entirely — asking the provider anyway used to
+        # stall the tailor for the full timeout on every click
+        return None
     user = (f"ORIGINAL RESUME:\n{raw_text}\n\nJOB DESCRIPTION:\n{jd_text}\n\n"
             "Rewrite the resume per the rules. Plain text only.")
     try:
@@ -41,7 +46,7 @@ def _llm_tailor(raw_text: str, jd_text: str, settings: dict) -> str | None:
                   "messages": [{"role": "system", "content": LLM_SYSTEM},
                                {"role": "user", "content": user}],
                   "temperature": 0.3, "max_tokens": 4000},
-            timeout=90,
+            timeout=20,
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
