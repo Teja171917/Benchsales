@@ -1131,6 +1131,15 @@ def city_of_location(loc: str, confirmed: set) -> str:
         return first if first in confirmed else ""
     if second in confirmed and first not in confirmed:
         return second
+    if second.lower() in _NOT_CITIES:
+        # "Texas, US" / "California, USA" name a state, not a city
+        if first.lower() in _NOT_CITY_STATES \
+                and first.lower() not in _STATE_NAME_CITIES:
+            return ""
+        return first
+    if first.lower() in _NOT_CITY_STATES \
+            and first.lower() not in _STATE_NAME_CITIES:
+        return ""
     return first
 
 

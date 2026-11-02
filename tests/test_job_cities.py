@@ -89,6 +89,10 @@ class JobCitiesTests(unittest.TestCase):
         self.assertEqual(f("Texas, TX", confirmed), "")
         self.assertEqual(f("Washington, DC", confirmed), "Washington")
         self.assertEqual(f("Washington, WA", confirmed), "")
+        self.assertEqual(f("Texas, US", confirmed), "")
+        self.assertEqual(f("California, USA", confirmed), "")
+        self.assertEqual(f("Houston, US", confirmed), "Houston")
+        self.assertEqual(f("New York, US", confirmed), "New York")
         self.assertEqual(f("", confirmed), "")
 
     def test_endpoint(self):
