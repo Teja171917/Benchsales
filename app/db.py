@@ -8,7 +8,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import emptype
+from . import emptype, visa
 from . import rules as rules_mod
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     salary TEXT DEFAULT '',
     employment_type TEXT DEFAULT '',
     emp_tags TEXT,
+    auth_tag TEXT,
     fetched_at TEXT NOT NULL,
     UNIQUE(source, source_id)
 );
@@ -311,6 +312,8 @@ def init_db() -> None:
         # --- migrations for databases created by older versions ---
         if "emp_tags" not in _columns(conn, "jobs"):
             conn.execute("ALTER TABLE jobs ADD COLUMN emp_tags TEXT")
+        if "auth_tag" not in _columns(conn, "jobs"):
+            conn.execute("ALTER TABLE jobs ADD COLUMN auth_tag TEXT")
         if "emp_pref" not in _columns(conn, "consultants"):
             conn.execute("ALTER TABLE consultants ADD COLUMN emp_pref TEXT DEFAULT ''")
         if "user_confirmed_skills_json" not in _columns(conn, "tailored_resumes"):
@@ -628,6 +631,8 @@ def insert_job(job: dict) -> int | None:
     tags = emptype.to_db(emptype.classify(
         job.get("employment_type", ""), job.get("title", ""),
         job.get("description", "")))
+    auth_tag = visa.classify_auth(
+        f"{job.get('title', '')}\n{job.get('description', '')}")
     with get_conn() as conn:
         # fuzzy dedupe: same title + company + location already present from
         # any source. (Location is part of the key: staffing vendors post the
@@ -644,8 +649,8 @@ def insert_job(job: dict) -> int | None:
             cur = conn.execute(
                 """INSERT INTO jobs(source, source_id, title, company, location,
                    remote_flag, url, description, posted_at, salary,
-                   employment_type, emp_tags, fetched_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   employment_type, emp_tags, fetched_at, auth_tag)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job.get("source", ""),
                     job.get("source_id", ""),
@@ -660,6 +665,7 @@ def insert_job(job: dict) -> int | None:
                     job.get("employment_type", ""),
                     tags,
                     now_iso(),
+                    auth_tag,
                 ),
             )
             conn.commit()
@@ -677,7 +683,7 @@ def _with_tags(row: dict) -> dict:
 # (the bulk of every row) is fetched per job when its drawer opens
 LIGHT_JOB_COLUMNS = ("id, source, title, company, location, remote_flag, "
                      "url, posted_at, fetched_at, salary, "
-                     "employment_type, emp_tags")
+                     "employment_type, emp_tags, auth_tag")
 
 
 def list_jobs(source: str = "", q: str = "", limit: int = 50,
@@ -757,7 +763,8 @@ def list_matches(consultant_id: int | None = None,
                  min_score: float = 0) -> list:
     sql = ('SELECT m.*, j.title AS job_title, j.company, j.location, j.url, '
            'j.source, j.posted_at, j.salary, j.employment_type, j.emp_tags, '
-           'j.remote_flag, c.name AS consultant_name '
+           'j.remote_flag, j.auth_tag, c.name AS consultant_name, '
+           'c.visa_status AS consultant_visa '
            'FROM "matches" m JOIN jobs j ON j.id=m.job_id '
            'JOIN consultants c ON c.id=m.consultant_id WHERE m.score >= ?')
     vals: list = [min_score]
@@ -771,7 +778,26 @@ def list_matches(consultant_id: int | None = None,
         r["score_breakdown"] = json.loads(r.pop("score_breakdown_json") or "{}")
         r["missing_skills"] = json.loads(r.pop("missing_skills_json") or "[]")
         _with_tags(r)
+        r["visa_ok"] = visa.compatible(r.get("consultant_visa") or "",
+                                        r.get("auth_tag") or "")
     return rows
+
+
+def backfill_auth_tags(batch: int = 500) -> int:
+    """Classify jobs whose auth_tag is still NULL (pre-feature rows).
+    Returns how many were filled; '' means the posting states nothing.
+    Idempotent — safe to run until it returns 0."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, title, description FROM jobs "
+            "WHERE auth_tag IS NULL LIMIT ?", (batch,)).fetchall()
+        for r in rows:
+            conn.execute(
+                "UPDATE jobs SET auth_tag=? WHERE id=?",
+                (visa.classify_auth(
+                    f"{r['title'] or ''}\n{r['description'] or ''}"),
+                 r["id"]))
+    return len(rows)
 
 
 def get_tailored_for_match(match_id: int) -> dict | None:

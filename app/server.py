@@ -12,7 +12,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import accounts, autolearn, contact as contact_mod, db, emptype, market, portals, usa
+from app import accounts, autolearn, contact as contact_mod, db, emptype, market, portals, usa, visa
 from app import assistant as assistant_mod
 from app import coverletter as coverletter_mod
 from app import applyfill as applyfill_mod
@@ -154,6 +154,18 @@ def _startup():
                 pass
     threading.Thread(target=_warm_demand, daemon=True,
                      name="benchpilot-demand-warm").start()
+    # classify the work-auth wording of jobs collected before the
+    # visa tags existed — batched, per workspace, until none are left
+    def _backfill_auth():
+        for path in db.all_paths():
+            try:
+                with db.use(path):
+                    while db.backfill_auth_tags():
+                        pass
+            except Exception:
+                pass
+    threading.Thread(target=_backfill_auth, daemon=True,
+                     name="benchpilot-auth-backfill").start()
     t = threading.Thread(target=_auto_collect_loop, daemon=True,
                          name="benchpilot-auto-collect")
     t.start()
@@ -1209,6 +1221,8 @@ def api_live_search(request: Request, data: dict):
                 j["emp_tags"] = emptype.classify(
                     j.get("employment_type", ""), j.get("title", ""),
                     j.get("description", ""))
+                j["auth_tag"] = visa.classify_auth(
+                    f"{j.get('title', '')}\n{j.get('description', '')}")
             if emp_wanted:
                 fetched = [j for j in fetched if emptype.matches_filter(
                     j["emp_tags"], emp_wanted, include_unspecified)]
