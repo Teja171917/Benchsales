@@ -125,12 +125,17 @@ class AccountHttpTests(unittest.TestCase):
             {"Acme Staffing": {"username": "acme", "password": "acme-pw"}})
         os.environ["BENCHPILOT_PASSWORD"] = "main-pw"
         os.environ.pop("BENCHPILOT_USERNAME", None)
+        # the signup policy opens only companies with a configured
+        # email domain; give the test company one
+        self._old_domains = accounts.COMPANY_EMAIL_DOMAINS
+        accounts.COMPANY_EMAIL_DOMAINS = {"acme_staffing": "acme.com"}
         from fastapi.testclient import TestClient
         from app import server
         self.client = TestClient(server.app, raise_server_exceptions=False)
 
     def tearDown(self):
         db.DB_PATH, accounts.ACCOUNTS_PATH = self._old_db, self._old_acc
+        accounts.COMPANY_EMAIL_DOMAINS = self._old_domains
         accounts._ready = False
         for k, v in self._old_env.items():
             if v is None:
@@ -233,7 +238,7 @@ class AccountHttpTests(unittest.TestCase):
         self.assertIn("waiting for approval", r.json()["detail"])
         # a session admin of acme cannot see or approve a MAIN signup
         self.client.post("/api/auth/signup", json={
-            "name": "Main Person", "email": "boss@main.com",
+            "name": "Main Person", "email": "bossmain@gmail.com",
             "password": "password-1", "company_id": "main"})
         self.client.post("/api/admin/users", headers=self._basic("acme", "acme-pw"), json={
             "email": "admin@acme.com", "name": "Acme Admin",
@@ -244,10 +249,10 @@ class AccountHttpTests(unittest.TestCase):
         acme_cookie = r.headers.get("set-cookie", "").split(";")[0]
         r = self.client.get("/api/admin/users",
                             headers={"Cookie": acme_cookie})
-        self.assertNotIn("boss@main.com", r.text)
+        self.assertNotIn("bossmain@gmail.com", r.text)
         r = self.client.get("/api/admin/users", headers=self._basic("x", "main-pw"))
         boss = [u for u in r.json()["users"]
-                if u["email"] == "boss@main.com"][0]
+                if u["email"] == "bossmain@gmail.com"][0]
         r = self.client.post(f"/api/admin/users/{boss['id']}/approve",
                              headers={"Cookie": acme_cookie},
                              json={"role": "member"})
@@ -257,7 +262,7 @@ class AccountHttpTests(unittest.TestCase):
                              headers=self._basic("x", "main-pw"), json={"role": "admin"})
         self.assertEqual(r.status_code, 200, r.text)
         r = self.client.post("/api/auth/login", json={
-            "email": "boss@main.com", "password": "password-1"})
+            "email": "bossmain@gmail.com", "password": "password-1"})
         self.assertEqual(r.status_code, 200, r.text)
         # acme's admin sees it pending, approves it as a member...
         r = self.client.get("/api/admin/users", headers=self._basic("acme", "acme-pw"))
