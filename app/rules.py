@@ -21,7 +21,8 @@ _HOURS_PER_YEAR = 2080
 
 def empty_rules() -> dict:
     return {"titles": [], "locations": [], "remote_only": False,
-            "min_rate": 0, "exclude_keywords": [], "exclude_clients": []}
+            "min_rate": 0, "exclude_keywords": [], "exclude_clients": [],
+            "approved_skills": []}
 
 
 def parse_rules(raw) -> dict:
@@ -55,7 +56,8 @@ def parse_rules(raw) -> dict:
             "remote_only": bool(raw.get("remote_only")),
             "min_rate": int(rate) if rate == int(rate) else rate,
             "exclude_keywords": _list("exclude_keywords"),
-            "exclude_clients": _list("exclude_clients")}
+            "exclude_clients": _list("exclude_clients"),
+            "approved_skills": [x.lower() for x in _list("approved_skills")]}
 
 
 def _is_remote(job) -> bool:

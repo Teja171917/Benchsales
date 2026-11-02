@@ -296,7 +296,8 @@ def auth_me(request: Request):
         return {"user": _public_user(user), "basic_workspace": None,
                 "workspace_users": accounts.count_users(user.get("company_slug")),
                 "admin_scope": sorted(scope),
-                "pending_approvals": pending}
+                "pending_approvals": pending,
+                "is_admin": user.get("role") == "admin"}
     basic = getattr(request.state, "basic_target", _NO_BASIC)
     if basic is not _NO_BASIC:
         slug = accounts._slug_for_path(basic)
@@ -304,9 +305,10 @@ def auth_me(request: Request):
                 "workspace_users": accounts.count_users(
                     None if slug == "main" else slug),
                 "admin_scope": sorted(scope),
-                "pending_approvals": pending}
+                "pending_approvals": pending, "is_admin": True}
     return {"user": None, "basic_workspace": None, "workspace_users": 0,
-            "admin_scope": [], "pending_approvals": 0}
+            "admin_scope": [], "pending_approvals": 0,
+            "is_admin": _caller_admin(request)}
 
 
 @app.get("/api/auth/google/login")
@@ -357,6 +359,17 @@ def google_callback(request: Request, code: str = "", state: str = ""):
                     httponly=True, secure=True, samesite="lax",
                     max_age=14 * 86400, path="/")
     return resp
+
+
+def _caller_admin(request: Request) -> bool:
+    """Is this caller an admin of the workspace they are acting in?
+    Mirrors _admin_scope (a session admin, or a legacy shared login —
+    the workspace's bootstrap admin authority); with no auth configured
+    at all (local dev) everything is open."""
+    if _admin_scope(request):
+        return True
+    return not (os.environ.get("BENCHPILOT_PASSWORD") or db.companies()
+                or accounts.any_users())
 
 
 def _admin_scope(request: Request) -> set:
@@ -988,11 +1001,13 @@ def api_job_cities():
 
 
 @app.get("/api/jobs")
-def api_list_jobs(source: str = "", q: str = "", limit: int = 50,
+def api_list_jobs(request: Request, source: str = "", q: str = "",
+                  limit: int = 50,
                   emp: str = "", include_unspecified: bool = False):
     """emp = comma list of full-time/c2c/w2/... tags (OR). Jobs whose type
     could not be detected are hidden when emp is set, unless
     include_unspecified=true."""
+    _require_admin(request)
     return db.list_jobs(source=source, q=q, limit=limit,
                         emp=emptype.parse_wanted(emp),
                         include_unspecified=include_unspecified)
@@ -1020,7 +1035,8 @@ def api_portals_check():
 
 
 @app.post("/api/jobs/import-url")
-def api_import_url(data: dict):
+def api_import_url(request: Request, data: dict):
+    _require_admin(request)
     url = (data.get("url") or "").strip()
     if not url:
         raise HTTPException(400, "url is required")
@@ -1061,12 +1077,13 @@ def api_firms():
 
 
 @app.post("/api/jobs/live-search")
-def api_live_search(data: dict):
+def api_live_search(request: Request, data: dict):
     """Search the boards right now for a job title (+ optional location).
 
     Returns listings without saving them; the frontend saves explicitly
     via /api/jobs/save-live.
     """
+    _require_admin(request)
     title = (data.get("title") or "").strip()
     if not title:
         raise HTTPException(400, "title is required")
@@ -1200,8 +1217,9 @@ def mix_sources(jobs: list, key) -> list:
 
 
 @app.post("/api/jobs/save-live")
-def api_save_live(data: dict):
+def api_save_live(request: Request, data: dict):
     """Save live-search listings into the job board (dedupes) and re-run matching."""
+    _require_admin(request)
     jobs = data.get("jobs") or []
     if not isinstance(jobs, list) or not jobs:
         raise HTTPException(400, "jobs list is required")
@@ -1244,12 +1262,14 @@ async def api_create_feedback(request: Request):
 
 
 @app.get("/api/feedback")
-def api_list_feedback():
+def api_list_feedback(request: Request):
+    _require_admin(request)
     return db.list_feedback()
 
 
 @app.post("/api/feedback/{fid}/status")
 async def api_feedback_status(fid: int, request: Request):
+    _require_admin(request)
     body = await request.json()
     status = str(body.get("status") or "")
     if status not in ("new", "planned", "done", "dismissed"):
@@ -1460,6 +1480,15 @@ def api_sources_status():
         enabled_sources = set(json.loads(settings.get("enabled_sources") or "[]"))
     except json.JSONDecodeError:
         enabled_sources = set(db.DEFAULT_ENABLED_SOURCES)
+    # the effective set: what collection actually pulls. Dice, Monster
+    # (with a token) and the staffing-firms feed run unless their own
+    # gate says off — Settings must show THIS set, not the raw stored
+    # list, or live sources look disabled.
+    effective = set(enabled_sources)
+    for _mod in SOURCES:
+        if _mod.NAME in ("dice", "monster", "smartrecruiters") \
+                and _mod.enabled(settings):
+            effective.add(_mod.NAME)
     out = []
     for mod in SOURCES:
         name = mod.NAME
@@ -1469,22 +1498,20 @@ def api_sources_status():
         except json.JSONDecodeError:
             pass
         configured = mod.enabled(settings)
+        selected = name in effective
         state = "disabled"
         if name == "dice":
             state = "ready (Dice official connector, free)" if configured else "disabled in settings"
-            if configured:
-                enabled_sources = set(enabled_sources) | {"dice"}
         elif name == "monster":
             state = ("ready (via Apify, every 12 h, in the automatic collection)" if configured
                      else "needs an Apify token (Replit Secret APIFY_TOKEN)")
-            if configured:
-                enabled_sources = set(enabled_sources) | {"monster"}
-        elif name in enabled_sources:
+        elif selected:
             state = "ready" if configured else "needs credentials"
         out.append({
             "name": name,
             "label": getattr(mod, "LABEL", name),
-            "enabled": name in enabled_sources and configured,
+            "enabled": selected and configured,
+            "selected": selected,
             "configured": configured,
             "state": state,
             "last_run": last,

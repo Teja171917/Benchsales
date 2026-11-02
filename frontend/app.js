@@ -21,6 +21,11 @@ const STATUS_LABEL = {queued: "Queued", applied: "Applied",
   screening: "Screening", interview: "Interview", offered: "Offered",
   placed: "Placed", rejected: "Rejected", withdrawn: "Withdrawn"};
 
+let ME = null;
+async function loadMe() {
+  try { ME = await api("/api/auth/me"); } catch (e) { /* leave null */ }
+  return ME;
+}
 function ago(iso) {
   if (!iso) return "never";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
@@ -416,6 +421,12 @@ let jobsFilter = jobsDefaults();
 let jobsCache = [];
 async function renderJobs() {
   const el = $("#tab-jobs");
+  if (!ME) await loadMe();
+  if (ME && ME.is_admin === false) {
+    el.innerHTML = `<div class="row spread"><h2>Jobs</h2></div>
+      <div class="card muted">The job pool is kept in the backend — collection keeps running and every posting still flows into Matches. The raw pool is admin-only; ask an admin if you need it for a demo.</div>`;
+    return;
+  }
   el.innerHTML = `
     <div class="row spread"><h2>Jobs</h2>
       <button class="btn primary" id="j-run">Run job collection</button></div>
@@ -683,7 +694,16 @@ let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best",
 function cityOf(m) {
   let loc = (m.location || "").trim();
   if (/^remote\s*-\s*/i.test(loc)) loc = loc.replace(/^remote\s*-\s*/i, "");
-  return loc ? loc.split(",")[0].trim() : "";
+  if (!loc) return "";
+  const parts = loc.split(",").map((x) => x.trim());
+  if (parts.length >= 2) {
+    // "Locality, Harris County" is a district, not a city (matches the
+    // backend's city list); NYC boroughs mean New York
+    if (/ county$/i.test(parts[1])) return "";
+    if (["manhattan", "brooklyn", "queens", "bronx", "staten island"]
+        .includes(parts[1].toLowerCase())) return "New York";
+  }
+  return parts[0];
 }
 function workTypeOf(m) {
   if (m.remote_flag) return "remote";
@@ -994,6 +1014,7 @@ async function renderQueue() {
           <div class="muted">${esc(a.company)} · ${esc(a.consultant_name)} · score ${a.score}</div>
           <div class="row" style="margin-top:6px">
             ${a.url ? `<a class="btn" href="${esc(a.url)}" target="_blank" rel="noopener">Apply link</a>` : ""}
+            ${a.tailored_resume_id ? `<button class="btn" data-resume="${a.match_id}">Resume</button>` : ""}
             <select data-move="${a.id}" aria-label="Move to status">
               ${STATUSES.map((x) => `<option value="${x}"${x === a.status ? " selected" : ""}>${STATUS_LABEL[x]}</option>`).join("")}
             </select>
@@ -1024,6 +1045,7 @@ async function renderQueue() {
         renderQueue();
       });
     });
+    $$("[data-resume]", el).forEach((b) => b.onclick = () => tailorModal(Number(b.dataset.resume)));
     $$("[data-move]", el).forEach((sel) => sel.onchange = async () => {
       await api(`/api/applications/${sel.dataset.move}`,
         {method: "PATCH", body: JSON.stringify({status: sel.value})});
@@ -1103,7 +1125,7 @@ async function renderSettings() {
       <button class="btn" id="s-qadd">Add query</button></div>
     <div class="card"><h3>Enabled sources</h3>
       ${srcs.filter((x) => x.name !== "urlimport").map((x) => `
-        <label class="toggle"><input type="checkbox" data-src="${x.name}"${enabledSrcs.includes(x.name) ? " checked" : ""}> ${esc(x.label)}</label>`).join("")}
+        <label class="toggle"><input type="checkbox" data-src="${x.name}"${x.selected ? " checked" : ""}> ${esc(x.label)}</label>`).join("")}
     </div>
     <div class="card"><h3>Auto-refresh</h3>
       <div class="kv">
@@ -1308,13 +1330,17 @@ const FB_CATS = {feature: "Feature request", problem: "Problem", idea: "Idea"};
 const FB_STATUS = {new: "New", planned: "Planned", done: "Done", dismissed: "Dismissed"};
 async function renderFeedback() {
   const el = $("#tab-feedback");
+  if (!ME) await loadMe();
+  const isAdmin = !ME || ME.is_admin !== false;
   let items = [];
-  try { items = await api("/api/feedback"); } catch (e) { /* list is best-effort */ }
+  if (isAdmin) {
+    try { items = await api("/api/feedback"); } catch (e) { /* list is best-effort */ }
+  }
   el.innerHTML = `
     <div class="row spread"><h2>Feedback</h2></div>
     <div class="card">
       <h3 style="margin-top:0">What should this app do for you?</h3>
-      <div class="muted" style="margin-bottom:8px">Tell the team what's missing, what's slow, or what you wish BenchPilot did. Every point lands here and gets picked up for building.</div>
+      <div class="muted" style="margin-bottom:8px">Tell the team what's missing, what's slow, or what you wish BenchPilot did. Points go to the workspace admins, who work through them and make the fixes.</div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <select id="fb-cat" class="input">
           <option value="feature">Feature request</option>
@@ -1326,7 +1352,7 @@ async function renderFeedback() {
       <textarea id="fb-text" class="input" rows="3" style="width:100%;margin-top:8px" placeholder="e.g. On Matches, let me filter by salary range…"></textarea>
       <div style="margin-top:8px"><button class="btn primary" id="fb-send">Send feedback</button></div>
     </div>
-    <div id="fb-list">${items.length ? items.map((f) => `
+    ${isAdmin ? `<div id="fb-list">${items.length ? items.map((f) => `
       <div class="card">
         <div class="row spread">
           <div><span class="fb-chip fb-cat">${esc(FB_CATS[f.category] || "Idea")}</span>
@@ -1335,7 +1361,7 @@ async function renderFeedback() {
           <div class="row" style="gap:6px">${["planned", "done", "dismissed"].filter((st) => st !== f.status).map((st) => `<button class="btn" data-fb-status="${f.id}:${st}">${st === "dismissed" ? "Dismiss" : "Mark " + st}</button>`).join("")}</div>
         </div>
         <div style="margin-top:6px">${esc(f.text)}</div>
-      </div>`).join("") : `<div class="card muted">No feedback yet — be the first to ask for something.</div>`}</div>`;
+      </div>`).join("") : `<div class="card muted">No feedback yet — be the first to ask for something.</div>`}</div>` : `<div class="card muted">Only workspace admins see the feedback board — your points go straight to them.</div>`}`;
   $("#fb-send").onclick = async () => {
     const text = $("#fb-text").value.trim();
     if (!text) { toast("Write the feedback first", "err"); return; }
@@ -1358,7 +1384,7 @@ async function renderFeedback() {
 /* ================= AGENT OFFICE ================= */
 const AGENT_INFO = {
   scout: {name: "Scout", desc: "Watches the board for fresh matches above your threshold, grouped per consultant."},
-  tailor: {name: "Tailor", desc: "Pre-drafts tailored resumes for good matches (score set in Settings, default 65+). Drafts only — added skills need a person to confirm them before anything is queued."},
+  tailor: {name: "Tailor", desc: "Pre-drafts tailored resumes for good matches (score set in Settings, default 65+). Open a draft from Matches → Tailor resume, or from the Apply Queue's Resume button. Drafts only — added skills need a person to confirm them before anything is queued."},
   watchdog: {name: "Watchdog", desc: "Flags pipeline going cold. On autopilot it also leaves follow-up reminders on stale applications."},
   market_analyst: {name: "Market Analyst", desc: "Per-consultant demand briefing from live postings. On autopilot it adds search queries for hot skills the bench doesn't cover."},
   outreach: {name: "Outreach", desc: "Drafts submission emails for top matches (score 80+). Drafts only — a human always sends."},

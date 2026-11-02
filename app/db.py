@@ -20,7 +20,10 @@ DEFAULT_SEARCH_QUERIES = [
     {"title": "Python Developer", "location": "Remote"},
     {"title": "DevOps Engineer", "location": "Houston, TX"},
 ]
-DEFAULT_ENABLED_SOURCES = ["adzuna", "jsearch", "remoteok", "remotive"]
+DEFAULT_ENABLED_SOURCES = ["adzuna", "jsearch", "remoteok", "remotive",
+                           "arbeitnow", "dice", "monster",
+                           "smartrecruiters"]
+_OLD_DEFAULT_SOURCES = ["adzuna", "jsearch", "remoteok", "remotive"]
 # arbeidnow exists as a bonus adapter but is OFF by default (EU-leaning source).
 
 DEFAULT_SETTINGS = {
@@ -380,6 +383,15 @@ def get_settings() -> dict:
     with get_conn() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
     out = {r["key"]: r["value"] for r in rows}
+    # migration: a workspace still carrying the ORIGINAL 4-source default
+    # never chose its sources — the product default is now every source
+    # on, so read it as the full list (a customised list is untouched).
+    try:
+        if json.loads(out.get("enabled_sources") or "[]") \
+                == _OLD_DEFAULT_SOURCES:
+            out["enabled_sources"] = json.dumps(DEFAULT_ENABLED_SOURCES)
+    except (ValueError, TypeError):
+        pass
     for key, env in ENV_SETTINGS.items():
         if not (out.get(key) or "").strip() and os.environ.get(env, "").strip():
             out[key] = os.environ[env].strip()
@@ -1047,6 +1059,10 @@ _NOT_CITY_STATES = {"texas", "california", "new york",
 }
 
 
+_NYC_BOROUGHS = {"manhattan", "brooklyn", "queens", "bronx",
+                "staten island"}
+
+
 def job_cities() -> list:
     """Every US city in the job pool, with its live job count — the
     Matches city filter is built from this, so the team sees the whole
@@ -1059,13 +1075,22 @@ def job_cities() -> list:
         loc = (r["location"] or "").strip()
         if not loc:
             continue
-        city = loc.split(",")[0].strip()
+        parts = [x.strip() for x in loc.split(",")]
+        city = parts[0]
         if city.lower().startswith("remote - "):
             city = city[len("Remote - "):].strip()
         if not city or city.lower() in _NOT_CITIES:
             continue
         if "," not in loc and city.lower() in _NOT_CITY_STATES:
             continue     # the whole location is just a state name
+        if len(parts) >= 2:
+            # Adzuna-style "Locality, Harris County" names a district,
+            # not a city — leave those jobs out of the city list rather
+            # than invent one. NYC boroughs do mean New York city.
+            if parts[1].lower().endswith(" county"):
+                continue
+            if parts[1].lower() in _NYC_BOROUGHS:
+                city = "New York"
         counts[city] = counts.get(city, 0) + 1
     return [{"city": c, "jobs": n} for c, n in
             sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]

@@ -35,6 +35,8 @@ class JobCitiesTests(unittest.TestCase):
         locations = [
             ("Java Dev", "Houston, TX"), ("Java Dev", "Houston, TX"),
             ("Web Dev", "Houston, TX"), ("Data Eng", "Austin, TX"),
+            ("SRE Role", "Trammells, Harris County"),
+            ("SRE Role", "Grand Central, Manhattan"),
             ("Data Eng", "Remote - Dallas, TX"), ("QA Lead", "Remote"),
             ("QA Lead", "Texas"), ("PM Role", "United States"),
             ("PM Role", ""), ("SRE Role", "New York, NY"),
@@ -63,7 +65,7 @@ class JobCitiesTests(unittest.TestCase):
     def test_cities_cover_the_whole_pool_with_counts(self):
         cities = {c["city"]: c["jobs"] for c in db.job_cities()}
         self.assertEqual(cities, {"Houston": 3, "Austin": 1,
-                                  "Dallas": 1, "New York": 1})
+                                  "Dallas": 1, "New York": 2})
         ordered = [c["city"] for c in db.job_cities()]
         self.assertEqual(ordered[0], "Houston")      # busiest first
 

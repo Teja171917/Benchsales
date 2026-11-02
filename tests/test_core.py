@@ -1812,7 +1812,8 @@ class StandingRulesTests(unittest.TestCase):
     def test_rules_round_trip_through_db(self):
         want = {"titles": ["Java Developer"], "locations": ["Houston, TX"],
                 "remote_only": True, "min_rate": 120000,
-                "exclude_keywords": ["clearance"], "exclude_clients": ["Acme"]}
+                "exclude_keywords": ["clearance"], "exclude_clients": ["Acme"],
+                "approved_skills": []}
         c = db.create_consultant({"name": "Priya Nair", "rules": want})
         self.assertEqual(c["rules"], want)
         self.assertEqual(db.get_consultant(c["id"])["rules"], want)

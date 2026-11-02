@@ -273,3 +273,34 @@ class AssistantSkillConfirmTests(unittest.TestCase):
         out = assistant.chat("confirm Cooking", actor="sam@x.io")
         self.assertIsNone(out["action"])
         self.assertEqual(self._tailored()["user_confirmed_skills"], [])
+
+
+class AssistantStandingApprovalTests(AssistantSkillConfirmTests):
+    """A standing approval ("approve Kubernetes for Pat") is the team's
+    one-time attestation: afterwards the skill is added automatically
+    whenever a post asks for it — everything else still needs a
+    per-post confirm."""
+
+    def test_approve_then_auto_add(self):
+        out = assistant.chat("approve Kubernetes for Pat", actor="sam@x.io")
+        self.assertEqual(out["action"]["type"], "skill_approved")
+        rules = db.get_consultant(self.cid)["rules"]
+        self.assertEqual(rules["approved_skills"], ["kubernetes"])
+        out = assistant.chat("add the missing skills for Pat",
+                             actor="sam@x.io")
+        # kubernetes auto-added per the approval; terraform still offered
+        self.assertEqual(out["action"]["type"], "skills_offered")
+        self.assertEqual(out["action"]["candidates"], ["terraform"])
+        self.assertIn("standing approval", out["reply"])
+        t = self._tailored()
+        self.assertEqual(t["user_confirmed_skills"], ["kubernetes"])
+        out = assistant.chat("confirm Terraform", actor="sam@x.io")
+        self.assertEqual(out["action"]["added"], ["terraform"])
+
+    def test_tailor_auto_adds_approved(self):
+        assistant.chat("approve Terraform for Pat", actor="sam@x.io")
+        out = assistant.chat("tailor Pat's resume", actor="sam@x.io")
+        self.assertEqual(out["action"]["type"], "tailored")
+        self.assertIn("standing approval", out["reply"])
+        t = self._tailored()
+        self.assertEqual(t["user_confirmed_skills"], ["terraform"])

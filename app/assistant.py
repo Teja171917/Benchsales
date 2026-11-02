@@ -17,7 +17,7 @@ import requests
 
 from . import db
 from . import tailor as tailor_mod
-from .skills import display_name
+from .skills import display_name, extract_skills
 
 SYSTEM = """You are the BenchPilot assistant, helping a bench sales /
 recruiting team inside their own BenchPilot workspace.
@@ -73,6 +73,10 @@ APP_GUIDE = """APP GUIDE:
   confirms them here ("confirm Kubernetes" / "confirm all") — that
   confirmation is the attestation that the consultant truly has them,
   recorded against the tailored resume. Nothing is ever added silently.
+- "Approve <skill> for <name>" records a STANDING approval: the team
+  attests once that the consultant has that skill, and from then on
+  it is added to tailored resumes automatically whenever a post
+  asks for it — always noted as coming from the standing approval.
 """
 
 
@@ -214,6 +218,31 @@ def _add_confirmed_skills(tailored: dict, match: dict,
     return clean
 
 
+def _approved_skills(cid: int) -> set:
+    c = db.get_consultant(cid) or {}
+    rules = c.get("rules") or {}
+    return {str(x).lower() for x in (rules.get("approved_skills") or [])}
+
+
+def _auto_add_approved(cid: int, match: dict, tailored: dict) -> list:
+    """Add any of this match's missing/flagged skills that carry a
+    standing approval (a team member attested earlier, on record, that
+    the consultant has them). Returns what was added."""
+    approved = _approved_skills(cid)
+    if not approved:
+        return []
+    already = set(tailored.get("user_confirmed_skills") or [])
+    candidates = []
+    for s in (match.get("missing_skills") or []) \
+            + (tailored.get("added_skills_flagged") or []):
+        if s not in already and s not in candidates:
+            candidates.append(s)
+    auto = [c for c in candidates if c.lower() in approved]
+    if not auto:
+        return []
+    return _add_confirmed_skills(tailored, match, auto)
+
+
 def _try_action(message: str, actor: str) -> dict | None:
     """Run a tailor/queue action when the message asks for one.
     Returns a chat reply dict, or None to fall through to the model."""
@@ -221,6 +250,47 @@ def _try_action(message: str, actor: str) -> dict | None:
     text = message.strip()
     low = text.lower()
     state = _last_action.get(key)
+
+    # --- standing approval: "approve <skill> for <name>" ---------------
+    if re.match(r"^(approve|authorize|authorise)\b", low):
+        consultants = db.list_consultants()
+        c = _find_consultant(text, consultants)
+        if not c:
+            names = ", ".join(x["name"] for x in consultants)
+            return {"reply": "Approve a skill for whom? This workspace "
+                             f"has: {names}. Say, for example, "
+                             "\"approve Kubernetes for "
+                             f"{consultants[0]['name'] if consultants else 'a consultant'}\".",
+                    "ai": False, "action": None}
+        rest = re.sub(r"^(approve|authorize|authorise)\b", "", low).strip()
+        phrase = re.split(r"\bfor\b", rest, maxsplit=1)[0].strip()
+        for tok in re.split(r"[^a-z0-9]+", c["name"].lower()):
+            if len(tok) >= 3:
+                phrase = phrase.replace(tok, " ").strip()
+        canon = extract_skills(phrase) or ([phrase] if phrase else [])
+        if not canon:
+            return {"reply": "Which skill should I approve? Say, for "
+                             f"example, \"approve Kubernetes for "
+                             f"{c['name']}\".",
+                    "ai": False, "action": None}
+        full_c = db.get_consultant(c["id"]) or {}
+        rules = dict(full_c.get("rules") or {})
+        approved = sorted(set(rules.get("approved_skills") or [])
+                          | {str(x).lower() for x in canon})
+        rules["approved_skills"] = approved
+        db.update_consultant(c["id"], {"rules": rules})
+        return {"reply":
+                f"Standing approval recorded for {c['name']}: "
+                + ", ".join(display_name(x) for x in canon)
+                + ". From now on, when a post asks for "
+                + ("it" if len(canon) == 1 else "them")
+                + " and the resume doesn't show it, I will add it to "
+                  "the tailored resume automatically and note it came "
+                  "from this approval. Every other missing skill still "
+                  "needs a per-post confirm.",
+                "ai": False,
+                "action": {"type": "skill_approved",
+                           "consultant_id": c["id"], "skills": canon}}
 
     # --- step 2 of the skills flow: an explicit confirmation ----------
     if state and state.get("kind") == "awaiting_skill_confirm":
@@ -302,12 +372,19 @@ def _try_action(message: str, actor: str) -> dict | None:
             out = _run_tailor(full)
             row = {"id": out["id"]}
         tailored = db.get_tailored(row["id"])
+        auto = _auto_add_approved(c["id"], full, tailored)
+        if auto:
+            tailored = db.get_tailored(tailored["id"])
         already = set(tailored.get("user_confirmed_skills") or [])
         candidates = []
         for s in (full.get("missing_skills") or []) \
                 + (tailored.get("added_skills_flagged") or []):
             if s not in already and s not in candidates:
                 candidates.append(s)
+        auto_note = (""
+                     if not auto else
+                     "Added per standing approval: "
+                     + ", ".join(display_name(a) for a in auto) + ".\n\n")
         if not candidates:
             _last_action[key] = {
                 "kind": "tailored", "match_id": match["id"],
@@ -315,10 +392,16 @@ def _try_action(message: str, actor: str) -> dict | None:
                 "consultant_name": c["name"],
                 "job_title": full["job_title"], "company": full["company"]}
             return {"reply":
-                    f"Nothing is missing — {c['name']}'s resume already "
-                    f"covers every skill the {full['job_title']} post at "
-                    f"{full['company']} asks for."
-                    '\n\nSay "queue it" to queue the tailored resume.',
+                    auto_note
+                    + (f"Nothing else is missing — {c['name']}'s resume "
+                       f"now covers every skill the {full['job_title']} "
+                       f"post at {full['company']} asks for."
+                       if auto else
+                       f"Nothing is missing — {c['name']}'s resume "
+                       f"already covers every skill the "
+                       f"{full['job_title']} post at {full['company']} "
+                       f"asks for.")
+                    + '\n\nSay "queue it" to queue the tailored resume.',
                     "ai": False, "action": None}
         _last_action[key] = {
             "kind": "awaiting_skill_confirm", "match_id": match["id"],
@@ -326,7 +409,8 @@ def _try_action(message: str, actor: str) -> dict | None:
             "consultant_name": c["name"], "job_title": full["job_title"],
             "company": full["company"]}
         return {"reply":
-                f"For {full['job_title']} at {full['company']}, "
+                auto_note
+                + f"For {full['job_title']} at {full['company']}, "
                 f"{c['name']}'s resume is missing: "
                 + ", ".join(display_name(s) for s in candidates)
                 + ".\n\nI won't add these on my own — that would be "
@@ -388,7 +472,13 @@ def _try_action(message: str, actor: str) -> dict | None:
         reply = (f"Done — tailored {c['name']}'s resume for "
                  f"{pick['job_title']} at {pick['company']} "
                  f"(match score {pick['score']}), written by {made}.")
-        flagged = out["added_skills_flagged"] or []
+        auto = _auto_add_approved(c["id"], db.get_match(pick["id"]),
+                                  db.get_tailored(out["id"]))
+        if auto:
+            reply += ("\n\nAdded per standing approval: "
+                      + ", ".join(display_name(a) for a in auto) + ".")
+        flagged = [f for f in (out["added_skills_flagged"] or [])
+                   if f not in auto]
         if flagged:
             reply += (f"\n\n⚠ Flagged — these were NOT added, because "
                       f"they are not in the original resume: "

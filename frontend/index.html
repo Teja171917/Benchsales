@@ -71,6 +71,10 @@
       }
       return t;
     }
+    if (me.is_admin === false) {
+      var jb = document.querySelector('[data-tab="jobs"]');
+      if (jb) jb.style.display = 'none';
+    }
     if (me.user) {
       bar.appendChild(document.createTextNode(me.user.email));
       if (me.user.role === 'admin') bar.appendChild(teamLink());
