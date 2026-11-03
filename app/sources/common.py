@@ -22,7 +22,11 @@ def safe_error(e) -> str:
 
 
 def clean(s):
-    return (s or "").strip()
+    # feeds occasionally hand back numbers (e.g. a unix timestamp) where a
+    # string is expected; coerce instead of crashing the whole source
+    if s is None:
+        return ""
+    return str(s).strip()
 
 
 def strip_html(html: str) -> str:

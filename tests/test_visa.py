@@ -131,3 +131,30 @@ class StorageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---- stack titles: generic headlines still find their stack (Nov 2) ----
+def test_stack_title_signatures():
+    from app import matcher
+    net = [".net", ".net core", "asp.net", "c#", "entity framework",
+           "azure", "docker", "aws"]
+    assert matcher.stack_title(net) == ".NET Developer"
+    assert matcher.stack_title(["java", "spring boot", "sql"]) == "Java Developer"
+    assert matcher.stack_title(["java", "sql", "jira"]) == ""      # java alone: no signal
+    assert matcher.stack_title(["python", "airflow", "spark"]) == "Data Engineer"
+    assert matcher.stack_title(["python", "django"]) == "Python Developer"
+    assert matcher.stack_title(["python", "pandas"]) == ""         # python alone: no signal
+    assert matcher.stack_title(["react", "css"]) == "React Developer"
+    assert matcher.stack_title(["jira", "confluence"]) == ""
+
+
+def test_titles_for_appends_stack_for_generic_headline():
+    from app import matcher
+    c = {"name": "Sandeep Kumar Reddy Gadige",
+         "raw_text": "SANDEEP KUMAR REDDY GADIGE\nLead Developer | Principal Engineer",
+         "skills": [".net", ".net core", "asp.net", "c#"],
+         "target_roles": "", "filename": ""}
+    titles = matcher.titles_for(c)
+    assert ".NET Developer" in titles, titles
+    typed = dict(c, target_roles=".NET Architect")
+    assert matcher.titles_for(typed) == [".NET Architect"]   # typed roles win, untouched

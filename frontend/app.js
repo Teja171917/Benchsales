@@ -34,6 +34,10 @@ async function loadMe() {
   }
   return ME;
 }
+function scoreCls(score) {
+  const n = Number(score) || 0;
+  return n >= 85 ? "hot" : n >= 70 ? "warm" : "";
+}
 function ago(iso) {
   if (!iso) return "never";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
@@ -904,7 +908,7 @@ function renderMatchCards() {
       </div>
       ${m.visa_ok === false ? `<div style="margin-top:6px;color:#d64545"><b>Visa conflict:</b> posting says “${esc(AUTH_LABELS[m.auth_tag] || m.auth_tag)}” — ${esc(m.consultant_name)} is ${esc(m.consultant_visa || "—")}</div>` : ""}
       <div class="row" style="margin:8px 0">
-        <span class="score-num">${m.score}</span>
+        <span class="score-num ${scoreCls(m.score)}">${m.score}</span>
         <div class="scorebar"><div style="width:${Math.min(100, m.score)}%"></div></div>
         <span class="muted">for ${esc(m.consultant_name)}</span>
       </div>
@@ -1099,8 +1103,8 @@ async function tailorModal(mid) {
 let queueFilter = {consultant: ""};
 async function renderQueue() {
   const el = $("#tab-queue");
-  el.innerHTML = `<div class="row spread"><h2>Apply Queue</h2>
-    <span class="muted">v1 is assisted apply: open the posting, submit the tailored resume, then move the card.</span></div>
+  el.innerHTML = `<div class="row spread"><h2>Apply Queue</h2></div>
+    <div class="card explainer"><b>What this board is:</b> your apply worklist. Every card is a job already matched to a consultant, with its tailored resume attached. <b>Nothing is submitted automatically</b> — a recruiter opens the posting, applies on the employer's site with the attached resume, then drags the card along (Queued → Applied → Interview → Placed). Cards land here when you queue a match, or automatically when the Tailor agent drafts a resume at 65+.</div>
     <div class="card"><div class="filters" style="grid-template-columns:repeat(auto-fit,minmax(200px,260px))">
       <div><label class="flabel" for="q-c">Consultant</label>
         <select id="q-c"><option value="">All consultants</option></select></div>
@@ -1378,6 +1382,7 @@ async function renderOverview() {
       <div class="card"><h3>Data freshness</h3><div id="ov-fresh" class="muted">Loading…</div>
         <div style="margin-top:12px"><button class="btn" id="ov-collect">Run job collection</button></div></div>
     </div>
+    <div class="card"><h3>Matches by consultant</h3><div id="ov-byc" class="muted">Loading…</div></div>
     <div class="card"><div class="row spread"><h3 style="margin:0">Top matches</h3>
       <button class="btn" id="ov-allm">View all</button></div>
       <div id="ov-top" style="margin-top:6px">${skelRows(3)}</div></div>
@@ -1386,10 +1391,11 @@ async function renderOverview() {
   $("#ov-allm").onclick = () => go("matches");
   $("#ov-collect").onclick = async () => { await runCollection(); renderOverview(); refreshBadges(); };
   try {
-    const [cs, jobs, ms, apps, st] = await Promise.all([
+    const [cs, jobs, ms, apps, st, srcst] = await Promise.all([
       api("/api/consultants"), api("/api/jobs/count"),
       api("/api/matches/summary"), api("/api/applications"),
       api("/api/collect/status").catch(() => null),
+      api("/api/sources/status").catch(() => null),
     ]);
     const placed = apps.filter((a) => a.status === "placed").length;
     const active = apps.filter((a) => !["rejected", "withdrawn", "placed"].includes(a.status)).length;
@@ -1421,6 +1427,20 @@ async function renderOverview() {
           ? `Auto-refresh every ${st.interval_minutes} min · last run ${ago(st.last_run_at)}${last}`
           : (st.last_run_at ? `Auto-refresh off · last run ${ago(st.last_run_at)}${last}` : "Auto-refresh off — no runs yet");
     } else f.textContent = "Status unavailable";
+    if (srcst) {
+      const bad = srcst.filter((s) => s.last_run && String(s.last_run.status || "").startsWith("error"));
+      const ran = srcst.filter((s) => s.last_run && s.last_run.at);
+      const okN = ran.length - bad.length;
+      f.innerHTML += `<div style="margin-top:8px">Job sources: <b>${okN}/${ran.length} healthy</b>${bad.length ? ` — <span style="color:#d64545">${bad.map((s) => esc(s.name)).join(", ")} errored on the last run</span>` : " — every source pulled jobs on the last run"}</div>`;
+    }
+    const byc = {};
+    (ms.by_consultant || []).forEach((r) => { byc[r.name] = r.n; });
+    const maxByc = Math.max(1, ...Object.values(byc));
+    $("#ov-byc").innerHTML = cs.length ? cs.map((c) => `
+      <div class="frow" style="grid-template-columns:190px 1fr 44px"><span class="fl" style="white-space:normal">${esc(c.name)}</span>
+        <div class="fbar"><div style="width:${Math.round(((byc[c.name] || 0) / maxByc) * 100)}%"></div></div>
+        <span class="fn">${byc[c.name] || 0}</span></div>`).join("")
+      : "No consultants yet.";
     const top = ms.top.slice(0, 5);
     $("#ov-top").innerHTML = top.map((m) => `
       <div class="topmatch"><div class="ti"><div class="tt">${esc(m.job_title)}</div>
@@ -1513,7 +1533,7 @@ async function renderOffice() {
   const el = $("#tab-office");
   el.innerHTML = `
     <div class="row spread"><div><h2 style="margin-bottom:2px">Agent Office</h2>
-      <div class="muted">Six agents working your pipeline around the clock — runs automatically every day.</div></div>
+      <div class="muted">Six agents working your pipeline around the clock — runs automatically every day. Each card below shows what that agent actually produced on its last run: real matches found, resumes drafted, follow-ups flagged. If a number is 0, the agent ran and found nothing to do.</div></div>
       <div class="row" style="gap:10px;align-items:center">
         <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer" title="When on, agents fix safe issues themselves (quarantine mismatches, expand search queries, leave follow-up reminders). They never send email, queue applications, or acknowledge resume skills.">
           <input type="checkbox" id="of-autopilot"> Autopilot</label>

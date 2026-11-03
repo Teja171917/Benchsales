@@ -213,6 +213,13 @@ def build_queries(consultants: list, manual: list, max_queries: int = 8) -> list
             titles = [t] if t else []
         if not titles:
             continue
+        # a generic headline ("Lead Developer") never surfaces the person's
+        # actual stack postings; add the skill-derived stack title to their
+        # rotation so those searches get turns too
+        stack = matcher.stack_title(c.get("skills") or [])
+        if stack and not any(stack.split()[0].lower() in t.lower()
+                             for t in titles):
+            titles = titles + [stack]
         qs = []
         loc = _loc_query(c.get("location"))
         for title in titles:

@@ -925,7 +925,12 @@ def matches_summary(top_n: int = 8) -> dict:
             'ORDER BY m.score DESC, m.id DESC LIMIT ?', (top_n,))]
     for r in rows:
         r["score_breakdown"] = json.loads(r.pop("score_breakdown_json") or "{}")
-    return {"total": total, "top": rows}
+    with get_conn() as conn:
+        by_consultant = [dict(r) for r in conn.execute(
+            'SELECT c.name AS name, COUNT(*) AS n FROM "matches" m '
+            'JOIN consultants c ON c.id=m.consultant_id '
+            'GROUP BY c.name ORDER BY n DESC')]
+    return {"total": total, "top": rows, "by_consultant": by_consultant}
 
 
 def get_match(mid: int) -> dict | None:

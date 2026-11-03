@@ -1,6 +1,15 @@
 """Arbeitnow adapter (bonus, no key). EU-leaning job board.
 Off by default for a US bench-sales team; toggle in Settings."""
+from datetime import datetime, timezone
+
 from .common import get_json_cached, clean
+
+
+def _posted(raw) -> str:
+    """Arbeitnow's created_at is a unix timestamp (int), not a string."""
+    if isinstance(raw, (int, float)) and raw > 0:
+        return datetime.fromtimestamp(raw, tz=timezone.utc).isoformat()
+    return clean(raw)
 
 NAME = "arbeitnow"
 LABEL = "Arbeitnow (no key, EU-leaning)"
@@ -27,7 +36,7 @@ def fetch(query: dict, settings: dict) -> list[dict]:
             "remote_flag": bool(j.get("remote")),
             "url": clean(j.get("url")),
             "description": clean(j.get("description")),
-            "posted_at": clean(j.get("created_at")),
+            "posted_at": _posted(j.get("created_at")),
             "salary": "",
             "employment_type": ", ".join(j.get("job_types") or []),
         })

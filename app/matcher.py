@@ -147,11 +147,53 @@ def consultant_title(raw_text: str) -> str:
     return cand
 
 
+# Stack signatures: (skills that signal the stack, minimum hits, search title).
+# Ordered by specificity — the first signature that fires wins. A resume whose
+# headline is generic ("Lead Developer", "Solution Architect") still belongs to
+# a stack; without this, the collector searches the generic headline and the
+# matcher scores real stack postings near zero on title.
+_STACK_TITLES = [
+    ({".net", ".net core", "asp.net", "asp.net core", "c#",
+      "entity framework"}, 2, ".NET Developer"),
+    ({"java", "spring", "spring boot", "microservices", "j2ee",
+      "hibernate"}, 2, "Java Developer"),
+    ({"python", "spark", "pyspark", "airflow", "etl", "snowflake",
+      "databricks", "kafka"}, 2, "Data Engineer"),
+    ({"python", "django", "flask", "fastapi"}, 2, "Python Developer"),
+    ({"angular"}, 1, "Angular Developer"),
+    ({"react"}, 1, "React Developer"),
+    ({"node.js", "nodejs", "express"}, 1, "Node.js Developer"),
+    ({"kubernetes", "terraform", "docker", "aws", "azure", "gcp"}, 3,
+     "DevOps Engineer"),
+]
+
+
+def stack_title(skills) -> str:
+    """The canonical job title for a resume's dominant stack, or "" when no
+    signature is clear. Java and Data Engineer require a real pairing (java
+    alone appears in plenty of data JDs; python alone is everywhere)."""
+    have = {str(s).strip().lower() for s in (skills or [])}
+    if "java" in have and not (have & {"spring", "spring boot",
+                                       "microservices", "j2ee", "hibernate"}):
+        have.discard("java")          # java without its ecosystem: not a signal
+    if "python" in have and not (have & {"spark", "pyspark", "airflow", "etl",
+                                         "snowflake", "databricks", "kafka",
+                                         "django", "flask", "fastapi"}):
+        have.discard("python")
+    for sig, need, title in _STACK_TITLES:
+        if len(have & sig) >= need:
+            return title
+    return ""
+
+
 def titles_for(consultant: dict) -> list:
     """The roles a consultant is matched (and searched) for. Target roles typed
     on the consultant win; otherwise the resume's own title(s), the role in the
     file name, and the role named in the summary. A 'title' that is really the
-    person's name is ignored."""
+    person's name is ignored. A stack title derived from the resume's skills is
+    appended when the resume-derived titles don't already name that stack, so a
+    .NET lead whose headline reads 'Lead Developer' still matches .NET
+    postings on title instead of being invisible to them."""
     typed = split_roles(consultant.get("target_roles") or "")
     if typed:
         return typed
@@ -166,6 +208,11 @@ def titles_for(consultant: dict) -> list:
     rs = role_from_summary(consultant.get("raw_text") or "")
     if rs and rs not in out and ROLE_WORDS.search(rs):
         out.append(rs)
+    stack = stack_title(consultant.get("skills"))
+    if stack:
+        key = stack.split()[0].lower()          # ".net" / "java" / "data" ...
+        if not any(key in t.lower() for t in out) and stack not in out:
+            out.append(stack)
     return out
 
 
