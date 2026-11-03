@@ -297,9 +297,9 @@ ADZUNA_CALLS_PER_QUERY = 2  # the adapter reads 2 pages per query
 
 def adzuna_budget(settings: dict) -> int:
     try:
-        return max(0, min(int(settings.get("adzuna_daily_budget") or 80), 240))
+        return max(0, min(int(settings.get("adzuna_daily_budget") or 150), 240))
     except ValueError:
-        return 80
+        return 150
 
 
 def effective_interval_minutes(settings: dict | None = None) -> int:
@@ -320,5 +320,10 @@ def effective_interval_minutes(settings: dict | None = None) -> int:
         n = len(queries_for_run(settings))
         cost = max(1, n * ADZUNA_CALLS_PER_QUERY)
         runs_per_day = max(1, adzuna_budget(settings) // cost)
-        wanted = max(wanted, math.ceil(1440 / runs_per_day))
+        slowed = math.ceil(1440 / runs_per_day)
+        # The budget may slow the rhythm, but never past hourly: the
+        # collector rotates which queries Adzuna spends on each run, and
+        # once the day's budget is spent Adzuna simply sits out while the
+        # other sources keep the hourly refresh going.
+        wanted = max(wanted, min(slowed, 60))
     return wanted

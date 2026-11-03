@@ -652,10 +652,30 @@ def _auto_collect_loop():
         time.sleep(30)
 
 
+OFFICE_EVERY_HOURS = 4
+
+
+def _office_due(last_iso: str, now) -> bool:
+    """The office is due when it has never run or its last run is at least
+    OFFICE_EVERY_HOURS old."""
+    if not last_iso:
+        return True
+    try:
+        last = datetime.fromisoformat(str(last_iso).replace("Z", "+00:00"))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    return (now - last) >= timedelta(hours=OFFICE_EVERY_HOURS)
+
+
 def _maybe_run_office():
-    """Run the Agent Office once per UTC day."""
-    today = datetime.now(timezone.utc).date().isoformat()
-    if db.get_setting("office_last_run_date") == today:
+    """Run the Agent Office every few hours so its briefing tracks the
+    hourly job refresh instead of going a full day stale. Safe at this
+    cadence: Watchdog notes are written once per stale episode, and
+    Tailor/Outreach only draft for matches they have not already drafted."""
+    if not _office_due(db.get_setting("office_last_run_at", "") or "",
+                       datetime.now(timezone.utc)):
         return
     try:
         office_mod.run_and_store()

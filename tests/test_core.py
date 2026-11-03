@@ -420,8 +420,12 @@ class AutoTests(unittest.TestCase):
         keyed = {**base, "adzuna_app_id": "a", "adzuna_app_key": "b"}
         n = len(autolearn.queries_for_run(keyed))        # 4 default queries -> 8 calls/run
         runs = 80 // (n * 2)
-        self.assertEqual(autolearn.effective_interval_minutes(keyed), -(-1440 // runs))
         self.assertLessEqual(runs * n * 2, 80)
+        # Nov 2 product call: the budget may slow the rhythm but never past
+        # hourly — query rotation spreads the calls and Adzuna sits out once
+        # the day's budget is spent (see test_collector_stops_at_daily_budget)
+        self.assertEqual(autolearn.effective_interval_minutes(keyed),
+                         max(15, min(-(-1440 // runs), 60)))
         self.assertEqual(autolearn.effective_interval_minutes({**keyed, "collect_interval_minutes": "0"}), 0)
 
     def test_collector_stops_at_daily_budget(self):

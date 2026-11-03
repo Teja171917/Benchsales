@@ -1533,7 +1533,7 @@ async function renderOffice() {
   const el = $("#tab-office");
   el.innerHTML = `
     <div class="row spread"><div><h2 style="margin-bottom:2px">Agent Office</h2>
-      <div class="muted">Six agents working your pipeline around the clock — runs automatically every day. Each card below shows what that agent actually produced on its last run: real matches found, resumes drafted, follow-ups flagged. If a number is 0, the agent ran and found nothing to do.</div></div>
+      <div class="muted">Six agents working your pipeline around the clock — the office re-runs automatically every few hours, right after a job refresh. Each card below shows what that agent actually produced on its last run: real matches found, resumes drafted, follow-ups flagged. If a number is 0, the agent ran and found nothing to do.</div></div>
       <div class="row" style="gap:10px;align-items:center">
         <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer" title="When on, agents fix safe issues themselves (quarantine mismatches, expand search queries, leave follow-up reminders). They never send email, queue applications, or acknowledge resume skills.">
           <input type="checkbox" id="of-autopilot"> Autopilot</label>
