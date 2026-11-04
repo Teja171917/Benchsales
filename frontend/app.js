@@ -105,8 +105,9 @@ async function refreshBadges() {
     if (feedback) set("#nb-feedback", feedback.filter((f) => f.status === "new").length);
     if (briefing && briefing.agents) {
       const ag = briefing.agents;
-      const attn = (ag.watchdog?.stale || 0) + (ag.tailor?.drafted || 0)
-        + (ag.outreach?.drafted || 0) + (ag.compliance?.issues || 0);
+      const attn = (ag.watchdog?.stale || 0) + (ag.watchdog?.links_dead || 0)
+        + (ag.tailor?.drafted || 0) + (ag.tracker?.stuck || 0)
+        + (ag.compliance?.issues || 0);
       set("#nb-office", attn);
     }
   } catch (e) { /* badges are best-effort */ }
@@ -1610,10 +1611,10 @@ async function renderFeedback() {
 const AGENT_INFO = {
   scout: {name: "Scout", desc: "Watches the board for fresh matches above your threshold, grouped per consultant."},
   tailor: {name: "Tailor", desc: "Pre-drafts tailored resumes for good matches (score set in Settings, default 65+). Open a draft from Matches → Tailor resume, or from the Apply Queue's Resume button. Drafts only — added skills need a person to confirm them before anything is queued."},
-  watchdog: {name: "Watchdog", desc: "Flags pipeline going cold. On autopilot it also leaves follow-up reminders on stale applications."},
+  watchdog: {name: "Watchdog", desc: "Flags pipeline going cold and re-checks queued postings' links — a card whose posting has closed gets flagged before it wastes a morning. On autopilot it also leaves follow-up reminders on stale applications."},
   market_analyst: {name: "Market Analyst", desc: "Per-consultant demand briefing from live postings. On autopilot it adds search queries for hot skills the bench doesn't cover."},
-  outreach: {name: "Outreach", desc: "Drafts submission emails for top matches (score 80+). Drafts only — a human always sends."},
-  compliance: {name: "Compliance", desc: "Flags employment-type conflicts before you apply. On autopilot it quarantines mismatches — reversible from here."},
+  tracker: {name: "Application Tracker", desc: "Owns the post-apply pipeline: funnel counts, what moved since the last run (including Applied flips detected from confirmation emails), and cards stuck in screening or interview."},
+  compliance: {name: "Compliance", desc: "Flags employment-type and visa/work-auth conflicts before you apply. On autopilot it quarantines employment-type mismatches — reversible from here. Visa conflicts are flagged, never auto-hidden."},
 };
 async function renderOffice() {
   const el = $("#tab-office");
@@ -1664,13 +1665,13 @@ async function renderOffice() {
   const tailor = A.tailor || {drafted: 0, drafts: []};
   const wd = A.watchdog || {stale: 0, items: []};
   const mkt = A.market_analyst || {consultants: [], top_skills: []};
-  const out = A.outreach || {drafted: 0, drafts: []};
+  const trk = A.tracker || {pipeline: {}, moved: 0, moved_items: [], email_flips: 0, stuck: 0, items: []};
   const comp = A.compliance || {issues: 0, items: []};
 
   $("#of-stats").innerHTML = [
     ["New matches (24h)", scout.new_matches, "accent", "matches"],
     ["Resume drafts ready", tailor.drafted, tailor.drafted ? "good" : "", null],
-    ["Outreach drafts", out.drafted, out.drafted ? "good" : "", null],
+    ["Cards moved (last run)", trk.moved, trk.moved ? "good" : "", "queue"],
     ["Compliance flags", comp.issues, comp.issues ? "accent" : "", null],
     ["Stale pipeline items", wd.stale, wd.stale ? "accent" : "", "queue"],
     ["Briefing from", ago(br.run_at), "", null],
@@ -1681,13 +1682,13 @@ async function renderOffice() {
     s.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") go(s.dataset.goto); };
   });
 
-  $("#of-agents").innerHTML = ["scout", "tailor", "watchdog", "market_analyst", "outreach", "compliance"].map((k) => {
+  $("#of-agents").innerHTML = ["scout", "tailor", "watchdog", "market_analyst", "tracker", "compliance"].map((k) => {
     const info = AGENT_INFO[k];
     const res = k === "scout" ? `${scout.new_matches} new matches`
       : k === "tailor" ? `${tailor.drafted} drafts ready`
-      : k === "watchdog" ? `${wd.stale} items flagged`
+      : k === "watchdog" ? `${wd.stale} stale · ${wd.links_dead || 0} closed postings`
       : k === "market_analyst" ? `${mkt.consultants.length} consultants briefed`
-      : k === "outreach" ? `${out.drafted} drafts ready`
+      : k === "tracker" ? `${trk.moved} moved · ${trk.stuck} stuck`
       : `${comp.issues} issues flagged`;
     return `<div class="card"><h3>${info.name} ${auto ? `<span class="chip" title="Autopilot is on — this agent fixes safe issues itself">AUTO</span>` : ""}</h3>
       <div class="muted" style="margin-bottom:8px">${info.desc}</div>
@@ -1695,7 +1696,7 @@ async function renderOffice() {
   }).join("");
 
   const acts = [];
-  for (const k of ["scout", "tailor", "watchdog", "market_analyst", "outreach", "compliance"]) {
+  for (const k of ["scout", "tailor", "watchdog", "market_analyst", "tracker", "compliance"]) {
     for (const a of ((A[k] || {}).actions || [])) acts.push({agent: AGENT_INFO[k].name, text: a.text});
   }
   const secs = [];
@@ -1746,19 +1747,22 @@ async function renderOffice() {
       </div>`).join("")
       : `<div class="muted" style="margin-top:8px">No resume data to analyze yet — upload consultant resumes first.</div>`}</div>`);
 
-  let drafts = [];
-  try { drafts = await api("/api/office/drafts?limit=20"); } catch (e) { drafts = []; }
-  secs.push(`<div class="card"><h3>Outreach drafts</h3>
-    ${drafts.length ? drafts.map((d) => `
-      <div style="padding:8px 0;border-bottom:1px solid var(--line)">
-        <div class="row spread"><div><b>${esc(d.subject)}</b>
-          <span class="muted"> · ${esc(d.job_title)} · ${esc(d.company)} · for ${esc(d.consultant_name)}</span></div>
-          <button class="btn" data-copy-draft="${d.id}">Copy email</button></div>
-        <details style="margin-top:6px"><summary class="muted">Preview</summary>
-          <pre class="doc" id="of-draft-${d.id}">${esc(d.body || "")}</pre></details>
-      </div>`).join("")
-      : `<div class="muted">No drafts yet — they appear here after an office run finds matches scoring ${out.cutoff || 80}+.</div>`}
-    <div class="muted" style="margin-top:8px">Drafts only — BenchPilot never sends email. Copy, edit, and send from your own inbox.</div></div>`);
+  const funnel = Object.entries(trk.pipeline || {});
+  secs.push(`<div class="card"><h3>Application Tracker <span class="muted" style="font-weight:normal">· the post-apply pipeline</span></h3>
+    ${funnel.length ? `<div style="margin:6px 0">${funnel.map(([st, n]) => `<span class="chip">${esc(st)}: <b>${n}</b></span>`).join("")}</div>` : `<div class="muted" style="margin-top:8px">No applications yet.</div>`}
+    <div class="muted" style="margin-top:6px">${trk.moved} card(s) moved since the last run${trk.email_flips ? ` · ${trk.email_flips} flipped to Applied from confirmation emails` : ""}.</div>
+    ${(trk.moved_items || []).length ? trk.moved_items.map((m) => `
+      <div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)">
+        <span class="badge">${esc(m.status)}</span>
+        <div><b>${esc(m.job_title)}</b> <span class="muted">· ${esc(m.company)} · ${esc(m.consultant_name)}</span></div>
+      </div>`).join("") : ""}
+    ${(trk.items || []).length ? `<div style="margin-top:10px"><b>Stuck mid-stage</b></div>` + trk.items.map((m) => `
+      <div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)">
+        <span class="badge">${esc(m.status)}</span>
+        <div><b>${esc(m.job_title)}</b> <span class="muted">· ${esc(m.company)} · ${esc(m.consultant_name)}</span>
+          <div class="muted">${esc(m.note)}</div></div>
+      </div>`).join("") : ""}
+  </div>`);
 
   secs.push(`<div class="card"><h3>Compliance flags</h3>
     ${(comp.items || []).length ? comp.items.map((c) => `
@@ -1771,9 +1775,10 @@ async function renderOffice() {
       </div>`).join("")
       : `<div class="muted" style="margin-top:8px">No conflicts — employment types line up on current matches.</div>`}</div>`);
 
+  const wdItems = [...(wd.items || []), ...(wd.dead_items || [])];
   secs.push(`<div class="card"><div class="row spread"><h3 style="margin:0">Needs attention</h3>
-    ${wd.items.length ? `<button class="btn" id="of-allq">Open queue</button>` : ""}</div>
-    ${wd.items.length ? wd.items.map((w) => `
+    ${wdItems.length ? `<button class="btn" id="of-allq">Open queue</button>` : ""}</div>
+    ${wdItems.length ? wdItems.map((w) => `
       <div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">
         <span class="badge">${esc(w.status)}</span>
         <div><b>${esc(w.job_title)}</b> <span class="muted">· ${esc(w.company)} · ${esc(w.consultant_name)}</span>

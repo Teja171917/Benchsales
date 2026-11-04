@@ -700,7 +700,7 @@ def _maybe_run_office():
     """Run the Agent Office every few hours so its briefing tracks the
     hourly job refresh instead of going a full day stale. Safe at this
     cadence: Watchdog notes are written once per stale episode, and
-    Tailor/Outreach only draft for matches they have not already drafted."""
+    Tailor only drafts for matches it has not already drafted."""
     if not _office_due(db.get_setting("office_last_run_at", "") or "",
                        datetime.now(timezone.utc)):
         return

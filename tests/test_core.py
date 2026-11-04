@@ -572,20 +572,17 @@ class OfficeAgentsTests(unittest.TestCase):
         gaps = [g["skill"] for g in pc["gaps"]]
         self.assertIn("playwright", gaps)
 
-    def test_outreach_drafts_from_real_data_only(self):
+    def test_office_run_creates_no_outreach_drafts(self):
+        # The Outreach drafter was replaced by the Application Tracker
+        # (Nov 4 2026): an office run must produce NO outreach drafts,
+        # and the briefing carries the tracker instead.
         c = self._consultant()
         jid = self._job("QA Manager", "We need a QA Manager with Selenium and Java.")
-        mid = db.insert_match(c["id"], jid, 85.0, {}, [])
-        first = office._outreach(db.get_settings())
-        self.assertEqual(first["drafted"], 1)
-        d = db.list_outreach_drafts()[0]
-        self.assertIn("Priya Nair", d["subject"])
-        self.assertIn("Selenium", d["body"])          # matched skill, display name
-        self.assertNotIn("years", d["body"].lower())  # never invents experience
-        self.assertIn("Drafted by BenchPilot Outreach", d["body"])
-        second = office._outreach(db.get_settings())  # no duplicates
-        self.assertEqual(second["drafted"], 0)
-        self.assertEqual(len(db.list_outreach_drafts()), 1)
+        db.insert_match(c["id"], jid, 85.0, {}, [])
+        br = office.run_office()
+        self.assertIn("tracker", br["agents"])
+        self.assertNotIn("outreach", br["agents"])
+        self.assertEqual(len(db.list_outreach_drafts()), 0)
 
     def test_compliance_flags_type_mismatch(self):
         c = self._consultant(emp_pref="c2c")
@@ -690,7 +687,7 @@ class OfficeAgentsTests(unittest.TestCase):
         br = office.run_office()
         self.assertEqual(set(br["agents"].keys()),
                          {"scout", "tailor", "watchdog",
-                          "market_analyst", "outreach", "compliance"})
+                          "market_analyst", "tracker", "compliance"})
 
     # ---- fixes added on top of Autopilot ----
     def _match(self, cid, title, score, missing=(), company="Co"):
@@ -718,7 +715,6 @@ class OfficeAgentsTests(unittest.TestCase):
         mid = self._match(c["id"], "A", 90.0)
         db.set_compliance_flag(mid, 1)
         self.assertEqual(office._tailor(db.get_settings())["drafted"], 0)
-        self.assertEqual(office._outreach(db.get_settings())["drafted"], 0)
 
     def test_compliance_runs_before_drafting(self):
         c = db.create_consultant({"name": "Priya Nair", "emp_pref": "c2c"})
@@ -734,7 +730,7 @@ class OfficeAgentsTests(unittest.TestCase):
         br = office.run_office()["agents"]
         self.assertEqual(br["compliance"]["issues"], 1)
         self.assertEqual(br["tailor"]["drafted"], 0)      # quarantined first
-        self.assertEqual(br["outreach"]["drafted"], 0)
+        self.assertIn("tracker", br)
 
     def test_scout_looks_back_past_a_sleep_gap(self):
         c = self._consultant()

@@ -12,14 +12,17 @@ recruiting pipeline keeps moving while the team is away:
                   acknowledgment; a consultant's standing rules can bar
                   whole categories of jobs from any agent action
   - Watchdog:    flags pipeline items going cold (queued/applied with no
-                  movement)
+                  movement) and re-checks queued postings' links, flagging
+                  the ones that have closed
   - Market Analyst: per-consultant demand briefing - which of their skills
                   are hot right now, and which in-demand skills they're
                   missing (computed from live posting data, no guessing)
-  - Outreach:    drafts submission emails for top matches (drafts only -
-                  a human always sends)
-  - Compliance:  flags employment-type / authorization conflicts before
-                  anyone applies (e.g. C2C consultant vs "W2 only" posting)
+  - Tracker:     owns the post-apply pipeline: funnel counts, what moved
+                  since the last run (including Applied flips detected
+                  from confirmation emails), and cards stuck mid-stage
+  - Compliance:  flags employment-type and visa/work-auth conflicts
+                  before anyone applies (e.g. C2C consultant vs "W2 only"
+                  posting; H1B consultant vs "US citizens only" posting)
 
 run_office() executes all agents and returns a briefing dict. The server
 scheduler runs it once a day and stores the briefing; the Office tab
@@ -41,6 +44,7 @@ from app import rules as rules_mod
 from app import tailor as tailor_mod
 from app import market as market_mod
 from app import emptype
+from app import linkcheck, visa
 from app import matcher
 from app.skills import display_name, extract_skills
 
@@ -50,6 +54,8 @@ MAX_DRAFTS_PER_RUN = 10   # default safety cap per office run (each drafting age
 MAX_QUEUE_ACTIONS_PER_RUN = 25  # cap on Tailor queue/attach actions per run
 STALE_QUEUED_DAYS = 3     # queued with no movement
 STALE_APPLIED_DAYS = 14   # applied with no update
+STUCK_STAGE_DAYS = 3      # screening/interview with no movement (Tracker)
+LINK_CHECKS_PER_RUN = 20  # queued posting links the Watchdog re-checks per run
 MARKET_WINDOW_DAYS = 30   # demand window for the Market Analyst
 MAX_QUERY_EXPANSIONS = 2  # new search queries the analyst may add per run
 
@@ -306,11 +312,57 @@ def _watchdog(settings=None):
             except Exception:
                 pass
 
-    for a in db.list_applications(status="queued"):
+    queued_apps = db.list_applications(status="queued")
+    for a in queued_apps:
         check(a, "queued", STALE_QUEUED_DAYS, "queued {} days, no action yet")
     for a in db.list_applications(status="applied"):
         check(a, "applied", STALE_APPLIED_DAYS, "applied {} days ago, no update")
-    return {"stale": len(stale), "items": stale, "actions": actions}
+
+    # --- dead-posting link checks -------------------------------------
+    # A queued card for a closed posting wastes a recruiter's morning.
+    # Only confident evidence flags a link (404/410, or a page that says
+    # the job is gone); bot walls and timeouts count as "couldn't
+    # verify" and are never flagged. Fetches run concurrently OUTSIDE
+    # any database work; notes are one small commit each.
+    dead_items = []
+    links = {"checked": 0, "dead": 0, "unknown": 0}
+    targets = [a for a in queued_apps if a.get("url")][:LINK_CHECKS_PER_RUN]
+    if targets:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            verdicts = list(pool.map(
+                lambda a: linkcheck.check(a["url"]), targets))
+        for a, (verdict, evidence) in zip(targets, verdicts):
+            links["checked"] += 1
+            if verdict == "unknown":
+                links["unknown"] += 1
+                continue
+            if verdict != "dead":
+                continue
+            links["dead"] += 1
+            dead_items.append({
+                "app_id": a["id"], "consultant_name": a["consultant_name"],
+                "job_title": a["job_title"], "company": a["company"],
+                "status": "queued", "days_stale": 0,
+                "note": f"posting link looks closed ({evidence}) — "
+                        f"check before spending time on this one",
+            })
+            marker = "[Watchdog] Posting link looks closed"
+            if autopilot and marker not in (a.get("notes") or ""):
+                new_notes = ((a.get("notes") or "").strip() + "\n"
+                             if a.get("notes") else "")
+                new_notes += f"{marker} ({evidence})."
+                try:
+                    db.update_application(a["id"], None, new_notes.strip())
+                    actions.append({
+                        "text": f"Flagged a closed posting on the queue: "
+                                f"{a['job_title']} ({a['company']}) — {evidence}.",
+                    })
+                except Exception:
+                    pass
+    return {"stale": len(stale), "items": stale, "actions": actions,
+            "links_checked": links["checked"], "links_dead": links["dead"],
+            "links_unknown": links["unknown"], "dead_items": dead_items}
 
 
 def _top_titles_for_skill(skill: str, since_iso: str, limit: int = 3) -> list[str]:
@@ -440,83 +492,51 @@ def _market_analyst(settings):
             "actions": actions, "window_days": MARKET_WINDOW_DAYS}
 
 
-def _draft_outreach_body(full: dict) -> tuple[str, str]:
-    """Draft a submission email from real match data only.
+def _tracker(settings, since):
+    """The post-apply pipeline, kept honest (replaced the Outreach
+    drafter Nov 4 2026 — its drafts went unread while the queue sat at
+    112 Queued / 0 Applied; what the team needs is movement tracking).
 
-    Uses matched skills (JD ∩ resume), the job posting, and the consultant's
-    employment preference. Never invents years of experience, rates, or
-    claims. Returns (subject, body).
-    """
-    jd = full.get("job_description") or ""
-    rskills = set(full.get("resume_skills") or [])
-    matched = sorted(set(extract_skills(jd)) & rskills)
-    shown = [display_name(s) for s in matched[:6]]
-    name = full.get("consultant_name") or "our consultant"
-    first = name.split()[0] if name else "our consultant"
-    title = full.get("job_title") or "the role"
-    company = full.get("company") or "your company"
-    location = full.get("location") or ""
-    score = full.get("score")
-
-    subject = f"Submission: {name} — {title} ({company})"
-
-    lines = [
-        "Hi [Hiring Manager],",
-        "",
-        f"I'd like to submit {name} for the {title} position at {company}"
-        + (f" ({location})" if location else "") + ".",
-        "",
-    ]
-    if shown:
-        lines.append(f"Why {first} fits — strong match on: " + ", ".join(shown) + ".")
-        lines.append("")
+    Reports the funnel, what actually moved since the last run —
+    including cards the inbox watcher flipped to Applied from portal
+    confirmation emails — and cards stuck in the active stages
+    (screening / interview) with no movement for days. Reports only;
+    Watchdog leaves the follow-up notes."""
+    apps = db.list_applications()
+    counts = {}
+    for a in apps:
+        counts[a["status"]] = counts.get(a["status"], 0) + 1
+    moved, stuck = [], []
+    now = _now()
+    for a in apps:
+        upd = _parse_iso(a.get("updated_at") or "")
+        if upd and upd >= since and a["status"] not in ("queued", "withdrawn"):
+            moved.append({
+                "app_id": a["id"], "consultant_name": a["consultant_name"],
+                "job_title": a["job_title"], "company": a["company"],
+                "status": a["status"],
+            })
+        if a["status"] in ("screening", "interview") and upd:
+            age = (now - upd).days
+            if age >= STUCK_STAGE_DAYS:
+                stuck.append({
+                    "app_id": a["id"], "consultant_name": a["consultant_name"],
+                    "job_title": a["job_title"], "company": a["company"],
+                    "status": a["status"], "days_stale": age,
+                    "note": f"in {a['status']} for {age} days with no update — "
+                            f"worth a follow-up",
+                })
+    flips = 0
     try:
-        c = db.get_consultant(full.get("consultant_id"))
-        tags = emptype.parse_wanted((c or {}).get("emp_pref") or "")
-        if tags:
-            lines.append("Open to " + "/".join(
-                emptype.TAG_LABELS.get(t, t) for t in tags) + ".")
-            lines.append("")
+        for e in db.list_activity(limit=200, kind="applied_detected"):
+            ts = _parse_iso(e.get("created_at") or "")
+            if ts and ts >= since:
+                flips += 1
     except Exception:
-        pass
-    lines += [
-        "Happy to share a tailored resume and set up a call at your convenience.",
-        "",
-        "Best regards,",
-        "[Your Name]",
-        "[Your Company] | [Phone]",
-        "",
-        "-- Drafted by BenchPilot Outreach. Edit before sending. --",
-    ]
-    return subject, "\n".join(lines)
-
-
-def _outreach(settings):
-    """Draft submission emails for top matches. Drafts only - never sent."""
-    drafted = []
-    candidates = [m for m in db.list_matches(min_score=OUTREACH_SCORE_CUTOFF)
-                  if not m.get("compliance_flag")
-                  and not _is_queued(m["id"]) and not db.has_outreach_draft(m["id"])]
-    for m in candidates[:MAX_DRAFTS_PER_RUN]:
-        full = db.get_match(m["id"])
-        if not full or not full.get("resume_text"):
-            continue
-        try:
-            subject, body = _draft_outreach_body(full)
-        except Exception:
-            continue  # one bad draft shouldn't stop the office
-        did = db.insert_outreach_draft(m["id"], subject, body)
-        drafted.append({
-            "draft_id": did,
-            "match_id": m["id"],
-            "consultant_name": m["consultant_name"],
-            "job_title": m["job_title"],
-            "company": m["company"],
-            "score": m["score"],
-            "subject": subject,
-        })
-    return {"drafted": len(drafted), "drafts": drafted,
-            "cutoff": OUTREACH_SCORE_CUTOFF, "actions": []}
+        flips = 0
+    return {"pipeline": counts, "moved": len(moved), "moved_items": moved[:10],
+            "email_flips": flips, "stuck": len(stuck), "items": stuck,
+            "actions": []}
 
 
 def _compliance(settings):
@@ -535,7 +555,8 @@ def _compliance(settings):
     issues = []
     actions = []
     seen_consultants = {}
-    for m in db.list_matches(min_score=threshold):
+    all_matches = db.list_matches(min_score=threshold)
+    for m in all_matches:
         cid = m.get("consultant_id")
         if cid not in seen_consultants:
             try:
@@ -574,14 +595,64 @@ def _compliance(settings):
                 "detail": detail,
                 "quarantined": quarantined or bool(m.get("compliance_flag")),
             })
-    return {"issues": len(issues), "items": issues, "actions": actions}
+
+    # --- visa / work-auth conflicts ------------------------------------
+    # Same data the match cards flag in red, collected in one place.
+    # Flagged, never quarantined: visa statuses are new data and a wrong
+    # profile entry shouldn't hide work — a human confirms first.
+    visa_conflicts = 0
+    for m in all_matches:
+        if m.get("visa_ok") is not False:
+            continue
+        visa_conflicts += 1
+        issues.append({
+            "match_id": m["id"],
+            "consultant_name": m["consultant_name"],
+            "job_title": m["job_title"],
+            "company": m["company"],
+            "score": m["score"],
+            "issue": "Visa / work-auth conflict",
+            "detail": (f"Posting says "
+                       f"“{visa.AUTH_LABELS.get(m.get('auth_tag') or '', m.get('auth_tag') or '')}”; "
+                       f"{m['consultant_name']} is "
+                       f"{m.get('consultant_visa') or '—'}."),
+            "quarantined": False,
+        })
+
+    # --- consultants whose visa status was never set -------------------
+    # Their cards can't be visa-checked at all; name them once so the
+    # team can fill the profile field (one minute each).
+    queued_by_name = {}
+    for a in db.list_applications(status="queued"):
+        queued_by_name[a["consultant_name"]] = \
+            queued_by_name.get(a["consultant_name"], 0) + 1
+    blank_visa = []
+    for c in db.list_consultants():
+        if not (c.get("visa_status") or "").strip() \
+                and c["name"] in queued_by_name:
+            blank_visa.append(c["name"])
+            issues.append({
+                "match_id": None,
+                "consultant_name": c["name"],
+                "job_title": "(profile)",
+                "company": "",
+                "score": "—",
+                "issue": "Visa status not set",
+                "detail": (f"{c['name']} has {queued_by_name[c['name']]} "
+                           f"queued card(s) but no visa status on their "
+                           f"profile — visa checks can't run for them "
+                           f"until it's set."),
+                "quarantined": False,
+            })
+    return {"issues": len(issues), "items": issues, "actions": actions,
+            "visa_conflicts": visa_conflicts, "blank_visa": blank_visa}
 
 
 def run_office() -> dict:
     """Run every agent and return the morning briefing.
 
-    Compliance goes first so Tailor and Outreach never draft for a match that
-    was just quarantined. Scout looks back to the previous run when the app
+    Compliance goes first so Tailor never drafts for a match that was
+    just quarantined. Scout looks back to the previous run when the app
     was asleep for more than a day (free hosting sleeps)."""
     settings = db.get_settings()
     now = _now()
@@ -598,7 +669,7 @@ def run_office() -> dict:
             "tailor": _tailor(settings),
             "watchdog": _watchdog(settings),
             "market_analyst": _market_analyst(settings),
-            "outreach": _outreach(settings),
+            "tracker": _tracker(settings, since),
             "compliance": compliance,
         },
     }

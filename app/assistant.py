@@ -63,8 +63,11 @@ APP_GUIDE = """APP GUIDE:
 - Signups: new team members sign up at /signup with the company ID and
   wait for an admin's approval before they can sign in.
 - Agent Office: six agents (Scout, Tailor, Watchdog, Market Analyst,
-  Outreach, Compliance) review the pipeline daily; their drafts always
-  need a person to send or approve.
+  Application Tracker, Compliance) review the pipeline every few hours.
+  The Tracker reports the apply funnel and what moved; Watchdog also
+  re-checks queued postings' links and flags closed ones; Compliance
+  flags employment-type and visa conflicts. Agents never send email or
+  submit applications — people do that.
 - Job collection runs automatically on the interval set in Settings;
   jobs are collected once and scored against every consultant.
 - Actions you can trigger by asking here: "tailor <name>'s resume" (or
