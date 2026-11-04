@@ -196,6 +196,8 @@ def _startup():
     t = threading.Thread(target=_auto_collect_loop, daemon=True,
                          name="benchpilot-auto-collect")
     t.start()
+    threading.Thread(target=_office_loop, daemon=True,
+                     name="benchpilot-office").start()
 
 
 # ---------- individual accounts: sign-in, sessions, admin ----------
@@ -653,8 +655,11 @@ def _next_due(interval: int):
 
 def _auto_collect_loop():
     """Background loop: refresh jobs on the schedule (the interval is the
-    setting, slowed down when needed to respect the job API's daily limit),
-    then let the Agent Office work on the fresh jobs."""
+    setting, slowed down when needed to respect the job API's daily
+    limit). Collections are kicked onto their own thread — running one
+    inline wedged this whole loop for 9+ hours on Nov 3-4 2026 when a
+    run stretched without bound, and everything behind it (resume
+    imports, the office) froze with it."""
     while True:
         for path in db.all_paths():   # each company's own resume folder
             try:
@@ -669,13 +674,24 @@ def _auto_collect_loop():
             else:
                 due = _next_due(interval)
                 _collect_status["next_run_at"] = due.isoformat()
-                if datetime.now(timezone.utc) >= due and not _collect_status["running"]:
-                    _do_collect()
+                if datetime.now(timezone.utc) >= due:
+                    _kick_collect()
         except Exception:
             pass  # collector records per-source errors; keep the loop alive
-        for path in db.all_paths():   # each company's agents work on its own data
-            with db.use(path):
-                _maybe_run_office()  # after the refresh, so it sees today's jobs
+        time.sleep(30)
+
+
+def _office_loop():
+    """The Agent Office on its OWN loop (Nov 4 2026): it used to ride the
+    collect loop, so one stuck collection froze the office too. Its
+    15-minute freshness must never depend on a job board answering."""
+    while True:
+        for path in db.all_paths():
+            try:
+                with db.use(path):
+                    _maybe_run_office()
+            except Exception:
+                pass
         time.sleep(30)
 
 
@@ -772,12 +788,18 @@ def api_unquarantine(mid: int):
     db.set_compliance_flag(mid, 0)
     return {"ok": True}
 
+_kick_lock = threading.Lock()
+
+
 def _kick_collect():
     """Start a collection in the background unless one is already running
     (used right after a resume upload so new jobs for that person arrive
-    without anyone pressing a button)."""
-    if _collect_status["running"]:
-        return False
+    without anyone pressing a button, by the scheduler when a run comes
+    due, and by the Collect button)."""
+    with _kick_lock:
+        if _collect_status["running"]:
+            return False
+        _collect_status["running"] = True   # claimed now; _do_collect's finally clears it
     threading.Thread(target=lambda: _safe_collect(), daemon=True,
                      name="benchpilot-kick").start()
     return True
@@ -788,6 +810,12 @@ def _safe_collect():
         _do_collect()
     except Exception:
         pass
+    finally:
+        # _kick_collect claims the running flag before spawning; the
+        # claim is released HERE no matter how the run ended, so a
+        # collection can never wedge the flag shut (_do_collect also
+        # clears it in its own finally — this is the guarantee).
+        _collect_status["running"] = False
 
 
 def _main_setting(key: str) -> str:
@@ -1202,8 +1230,13 @@ def api_import_url(request: Request, data: dict):
 
 @app.post("/api/collect")
 def api_collect(request: Request):
+    """Kick a collection in the background and return at once — this
+    used to run the whole collection inside the request, holding the
+    Jobs page open for the full run (minutes). The page now polls
+    /api/collect/status for completion."""
     _require_owner(request)
-    return _do_collect()
+    started = _kick_collect()
+    return {"started": started, "running": True}
 
 
 LIVE_SOURCES = [adzuna, jsearch, dice, remoteok, remotive, arbeitnow, smartrecruiters]  # dice: official connector

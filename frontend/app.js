@@ -766,20 +766,42 @@ async function updateFreshness() {
 }
 async function runCollection() {
   const prog = $("#j-prog");
-  if (prog) prog.textContent = "Collecting from enabled sources — this can take 1–3 minutes…";
-  else toast("Collecting from enabled sources — this can take 1–3 minutes…");
+  const say = (html) => { if (prog) prog.innerHTML = html; };
   try {
-    const s = await api("/api/collect", {method: "POST"});
-    const lines = Object.entries(s.sources).map(([n, v]) =>
-      `${n}: ${v.status}${v.status === "ok" ? ` — found ${v.jobs || 0}, ${v.new || 0} new` : ""}`);
-    if (prog) prog.innerHTML = `<div class="okbox">Done — ${s.jobs_new} new jobs, ${s.matches_new} new matches${s.matches_removed ? `, ${s.matches_removed} unrelated matches removed` : ""}.<br>${lines.map(esc).join("<br>")}</div>`;
-    else toast(`Done — ${s.jobs_new} new jobs, ${s.matches_new} new matches`, "ok");
+    const r = await api("/api/collect", {method: "POST"});
+    say(`<div class="muted">${r && r.started === false
+      ? "A collection is already running — watching for it to finish…"
+      : "Collection started in the background — it keeps going even if you leave this page. Watching for it to finish…"}</div>`);
+    if (!prog) toast("Collection started — running in the background", "ok");
+    // poll the status until the run lands (collections run in the
+    // background now; the request itself returns instantly)
+    let st = null;
+    for (let i = 0; i < 140; i++) {
+      await new Promise((res) => setTimeout(res, 3000));
+      st = await api("/api/collect/status").catch(() => null);
+      if (st && !st.running && st.last_result) break;
+      if (prog && st) prog.querySelector(".muted").textContent =
+        `Collecting… still running (${Math.round((i + 1) * 3)}s) — sources answer at very different speeds.`;
+    }
+    if (st && st.last_result) {
+      const lr = st.last_result;
+      let lines = [];
+      try {
+        const srcs = await api("/api/sources/status");
+        lines = srcs.filter((x) => x.last_run && x.last_run.status).map((x) =>
+          `${x.name}: ${x.last_run.status}${x.last_run.status === "ok" ? ` — found ${x.last_run.jobs || 0}, ${x.last_run.new || 0} new` : ""}`);
+      } catch (e) { /* lines are a nicety */ }
+      say(`<div class="okbox">Done — ${lr.jobs_new || 0} new jobs, ${lr.matches_new || 0} new matches.<br>${lines.map(esc).join("<br>")}</div>`);
+      if (!prog) toast(`Done — ${lr.jobs_new || 0} new jobs, ${lr.matches_new || 0} new matches`, "ok");
+    } else {
+      say(`<div class="muted">The collection is taking longer than usual — it's still running in the background and the freshness line above will update when it lands.</div>`);
+    }
     if ($("#j-list")) loadJobs();
     if ($("#j-fresh")) updateFreshness();
     refreshBadges();
   } catch (e) {
-    if (prog) prog.innerHTML = `<div class="errbox">Collection failed: ${esc(e.message)}</div>`;
-    else toast("Collection failed: " + e.message, "err");
+    say(`<div class="errbox">Collection failed: ${esc(e.message)}</div>`);
+    if (!prog) toast("Collection failed: " + e.message, "err");
   }
 }
 
