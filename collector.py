@@ -17,6 +17,14 @@ from app.sources import (adzuna, jsearch, remoteok, remotive, arbeitnow,
 SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster,
            smartrecruiters]
 
+# One slow or dying source must not stretch a run without bound: every
+# fetch has its own timeout, and each source gets this much wall-clock
+# for ALL its searches combined before the run moves on without it
+# (Nov 4 2026: an unbounded run wedged the scheduler for 9+ hours —
+# no collections finished and, because the office rode the same loop,
+# no office runs either).
+SOURCE_BUDGET_SECONDS = 240
+
 
 def jsearch_room(settings: dict) -> tuple[int, int]:
     """(calls left today for automatic runs, calls left this month)."""
@@ -144,6 +152,8 @@ def _run() -> dict:
             try:
                 fetched = 0
                 new = 0
+                cut_short = 0
+                t_start = datetime.now(timezone.utc)
                 usa_only = settings.get("usa_only", "1") == "1"
                 run_queries = queries
                 if name == "adzuna":
@@ -155,7 +165,11 @@ def _run() -> dict:
                     run_queries = rotated[:room]
                     if len(run_queries) < len(queries):
                         summary["budget_skipped"]["jsearch"] = len(queries) - len(run_queries)
-                for q in run_queries:
+                for qi, q in enumerate(run_queries):
+                    if (datetime.now(timezone.utc) - t_start).total_seconds() \
+                            >= SOURCE_BUDGET_SECONDS:
+                        cut_short = len(run_queries) - qi
+                        break
                     if name == "adzuna":  # count before calling: a failed call can still use quota
                         db.usage_add("adzuna", autolearn.ADZUNA_CALLS_PER_QUERY)
                     if name == "jsearch":
@@ -167,9 +181,15 @@ def _run() -> dict:
                         fetched += 1
                         if _save_job(job):
                             new += 1
-                if name == "monster":   # only a run that WORKED starts the 12-hour wait
+                if name == "monster" and not cut_short:   # only a run that WORKED starts the 12-hour wait
                     db.set_setting("monster_last_run_at", datetime.now(timezone.utc).isoformat())
-                st.update(status="ok", jobs=fetched, new=new)
+                if cut_short:
+                    st.update(status=(f"partial: stopped at the "
+                                      f"{SOURCE_BUDGET_SECONDS // 60}-minute source "
+                                      f"budget ({cut_short} searches left)"),
+                              jobs=fetched, new=new)
+                else:
+                    st.update(status="ok", jobs=fetched, new=new)
                 summary["jobs_fetched"] += fetched
                 summary["jobs_new"] += new
             except Exception as e:  # noqa: BLE001 - keep collecting other sources

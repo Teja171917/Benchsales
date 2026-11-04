@@ -96,7 +96,7 @@ def fetch(query: dict, settings: dict) -> list[dict]:
     r = requests.post(API.format(actor=(settings.get("apify_monster_actor") or ACTOR)
                                  .strip().replace("/", "~")),
                       params={"token": settings["apify_token"].strip()},
-                      json=build_input(query, settings), timeout=300)
+                      json=build_input(query, settings), timeout=60)
     r.raise_for_status()
     data = r.json()
     jobs, seen = [], set()
