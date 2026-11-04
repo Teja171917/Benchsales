@@ -107,15 +107,18 @@ class AdminGateTests(unittest.TestCase):
                        json.dumps(["adzuna", "jsearch", "remoteok",
                                    "remotive"]))
         got = json.loads(db.get_settings()["enabled_sources"])
-        self.assertEqual(set(got), {"adzuna", "jsearch", "remoteok",
-                                    "remotive", "arbeitnow", "dice",
+        self.assertEqual(set(got), {"adzuna", "jsearch", "dice",
                                     "monster", "smartrecruiters"})
         h = _basic("x", "main-pw")
         status = {x["name"]: x for x in
                   self.basic.get("/api/sources/status", headers=h).json()}
         self.assertTrue(status["smartrecruiters"]["selected"])
         self.assertTrue(status["dice"]["selected"])
-        self.assertTrue(status["arbeitnow"]["selected"])
+        self.assertTrue(status["monster"]["selected"])
+        # US-only wiring (Nov 4 2026): the global/EU boards are gone
+        self.assertNotIn("arbeitnow", status)
+        self.assertNotIn("remotive", status)
+        self.assertNotIn("remoteok", status)
         # a customised list is left exactly as the workspace set it
         db.set_setting("enabled_sources", json.dumps(["adzuna"]))
         got = json.loads(db.get_settings()["enabled_sources"])

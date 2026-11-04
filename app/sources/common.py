@@ -66,3 +66,15 @@ def get_json_cached(url: str, ttl: int = 300, **kw):
     data = r.json()
     _CACHE[url] = (time.time(), data)
     return data
+
+
+def get_text_cached(url: str, ttl: int = 900, **kw):
+    """HTML twin of get_json_cached: whole-page feeds (Phenom career
+    sites) are re-asked once per search query, so cache the page text."""
+    hit = _CACHE.get(url)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    r = get(url, **kw)
+    r.raise_for_status()
+    _CACHE[url] = (time.time(), r.text)
+    return r.text

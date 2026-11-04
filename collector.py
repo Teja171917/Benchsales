@@ -11,11 +11,13 @@ from datetime import datetime, timezone
 
 from app import autolearn, db, usa
 from app import matcher
-from app.sources import (adzuna, jsearch, remoteok, remotive, arbeitnow,
-                         dice, monster, smartrecruiters)
+from app.sources import (adzuna, jsearch, dice, monster, phenom,
+                         smartrecruiters)
 
-SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster,
-           smartrecruiters]
+# US-based sources only (owner decision, Nov 4 2026): the global/EU boards
+# (RemoteOK, Remotive, Arbeitnow) are no longer wired in — their adapter
+# modules stay in app/sources/ but nothing collects from them.
+SOURCES = [adzuna, jsearch, dice, monster, smartrecruiters, phenom]
 
 # One slow or dying source must not stretch a run without bound: every
 # fetch has its own timeout, and each source gets this much wall-clock
@@ -142,6 +144,8 @@ def _run() -> dict:
             enabled_sources.add("dice")       # free official connector: on by default
         if name == "smartrecruiters" and mod.enabled(settings):
             enabled_sources.add("smartrecruiters")   # no-key public feed: on by default
+        if name == "phenom" and mod.enabled(settings):
+            enabled_sources.add("phenom")   # staffing watchlist, Phenom cohort: on by default
         if name not in enabled_sources:
             st["status"] = "disabled in settings"
         elif not mod.enabled(settings):

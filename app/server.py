@@ -24,7 +24,7 @@ from app.relevance import title_fits
 from app import persist, resume_ai, resume_import
 from app import tailor as tailor_mod
 from app.skills import display_name, extract_skills
-from app.sources import adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster, urlimport, smartrecruiters
+from app.sources import adzuna, jsearch, dice, monster, urlimport, phenom, smartrecruiters
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -47,7 +47,7 @@ def _compute_asset_version() -> str:
 
 ASSET_VERSION = _compute_asset_version()
 
-SOURCES = [adzuna, jsearch, remoteok, remotive, arbeitnow, dice, monster, smartrecruiters]
+SOURCES = [adzuna, jsearch, dice, monster, smartrecruiters, phenom]
 
 app = FastAPI(title="BenchPilot", version="1.0")
 from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
@@ -1239,7 +1239,7 @@ def api_collect(request: Request):
     return {"started": started, "running": True}
 
 
-LIVE_SOURCES = [adzuna, jsearch, dice, remoteok, remotive, arbeitnow, smartrecruiters]  # dice: official connector
+LIVE_SOURCES = [adzuna, jsearch, dice, smartrecruiters]  # dice: official connector
 
 
 @app.get("/api/jobs/count")
@@ -1816,7 +1816,7 @@ def api_sources_status():
     # list, or live sources look disabled.
     effective = set(enabled_sources)
     for _mod in SOURCES:
-        if _mod.NAME in ("dice", "monster", "smartrecruiters") \
+        if _mod.NAME in ("dice", "monster", "smartrecruiters", "phenom") \
                 and _mod.enabled(settings):
             effective.add(_mod.NAME)
     out = []

@@ -20,11 +20,12 @@ DEFAULT_SEARCH_QUERIES = [
     {"title": "Python Developer", "location": "Remote"},
     {"title": "DevOps Engineer", "location": "Houston, TX"},
 ]
-DEFAULT_ENABLED_SOURCES = ["adzuna", "jsearch", "remoteok", "remotive",
-                           "arbeitnow", "dice", "monster",
+DEFAULT_ENABLED_SOURCES = ["adzuna", "jsearch", "dice", "monster",
                            "smartrecruiters"]
 _OLD_DEFAULT_SOURCES = ["adzuna", "jsearch", "remoteok", "remotive"]
-# arbeidnow exists as a bonus adapter but is OFF by default (EU-leaning source).
+# US-based sources only (owner decision, Nov 4 2026): the RemoteOK /
+# Remotive / Arbeitnow adapters still exist under app/sources/ but are
+# not wired into the collector or this default list.
 
 DEFAULT_SETTINGS = {
     "match_threshold": "60",
