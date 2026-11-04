@@ -1211,9 +1211,21 @@ def _loc_parts(loc: str) -> list:
     return [x.strip() for x in loc.split(",") if x.strip()]
 
 
+_cities_cache: dict = {}
+
+
 def confirmed_cities() -> set:
     """City names the pool itself proves are cities: any first segment
-    that appears with a state after it ("Houston, TX")."""
+    that appears with a state after it ("Houston, TX"). Cached per
+    database, keyed by the job count — it scans every job location and
+    is called on hot paths (matches, job cities), so recompute only
+    when the pool actually grows."""
+    with get_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    key = str(current_path())
+    hit = _cities_cache.get(key)
+    if hit and hit[0] == n:
+        return hit[1]
     with get_conn() as conn:
         rows = conn.execute("SELECT location FROM jobs").fetchall()
     out = set()
@@ -1224,6 +1236,7 @@ def confirmed_cities() -> set:
                     and (parts[0].lower() not in _NOT_CITY_STATES
                          or parts[0].lower() in _STATE_NAME_CITIES):
                 out.add(parts[0])
+    _cities_cache[key] = (n, out)
     return out
 
 

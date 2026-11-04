@@ -1418,12 +1418,28 @@ def api_save_live(request: Request, data: dict):
 
 
 # ---------- matches ----------
+_matches_cache: dict = {}
+
+
 @app.get("/api/matches")
 def api_list_matches(consultant_id: int = 0, min_score: float = 0):
+    """The full match list is the app's heaviest response (~1 MB at real
+    bench scale) and rebuilding it costs real CPU on a small instance
+    that is also running collections and the Agent Office — under that
+    contention the endpoint measured 7-39s while sibling endpoints
+    answered in ~1s. Match rows only change when a collection or the
+    office runs, so a 60-second per-workspace cache is invisible to
+    users and turns repeat opens into a memory hit."""
+    key = (str(db.current_path()), consultant_id, min_score)
+    now = time.time()
+    hit = _matches_cache.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
     rows = db.list_matches(consultant_id or None, min_score)
     confirmed = db.confirmed_cities()
     for m in rows:
         m["city"] = db.city_of_location(m.get("location") or "", confirmed)
+    _matches_cache[key] = (now + 60, rows)
     return rows
 
 
