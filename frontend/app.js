@@ -1149,7 +1149,7 @@ let queueFilter = {consultant: ""};
 async function renderQueue() {
   const el = $("#tab-queue");
   el.innerHTML = `<div class="row spread"><h2>Apply Queue</h2></div>
-    <div class="card explainer"><b>What this board is:</b> your apply worklist. Every card is a job already matched to a consultant, with its tailored resume attached. <b>Nothing is submitted automatically</b> — a recruiter opens the posting, applies on the employer's site with the attached resume, then drags the card along (Queued → Applied → Interview → Placed). Cards land here when you queue a match, or automatically when the Tailor agent drafts a resume at 65+.</div>
+    <div class="card explainer"><b>What this board is:</b> your apply worklist. Every card is a job already matched to a consultant, with its tailored resume attached. <b>Nothing is submitted automatically</b> — a recruiter opens the posting, applies on the employer's site with the attached resume, then drags the card along (Queued → Applied → Interview → Placed). Cards land here when you queue a match, or automatically when the Tailor agent drafts a resume at 65+. If the owner connects an application inbox in Settings, portal confirmation emails flip cards to Applied on their own — watch Activity for “Marked Applied from a … confirmation email”.</div>
     <div class="card"><div class="filters" style="grid-template-columns:repeat(auto-fit,minmax(200px,260px))">
       <div><label class="flabel" for="q-c">Consultant</label>
         <select id="q-c"><option value="">All consultants</option></select></div>
@@ -1274,6 +1274,17 @@ async function renderSettings() {
       </div>
       <div class="muted">Keys are shown masked. They can also be set as Replit Secrets (ADZUNA_APP_ID, ADZUNA_APP_KEY, RAPIDAPI_KEY, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL), which survive Republish. The LLM is also used to read resumes. Resume text is sent to that AI provider. Without an LLM key, tailoring and resume reading use the built-in simple methods and more resumes are marked "Needs a quick check".</div>
     </div>
+    <div class="card"><h3>Application inbox — auto “Applied” detection</h3>
+      <div class="muted" style="margin-bottom:8px">Applications happen on the portals' own sites, so the only trace is the confirmation email. Connect the inbox those confirmations land in and BenchPilot checks it every 15 minutes: when a Dice / Indeed / LinkedIn / ATS confirmation matches exactly one Queued card, that card flips to <b>Applied</b> by itself. Ambiguous matches are logged in Activity, never guessed. Read-only — mail is never moved, deleted or stored.</div>
+      <label class="toggle"><input type="checkbox" id="s-imap-on"${s.imap_enabled === "1" ? " checked" : ""}> Watch this inbox for application confirmations</label>
+      <div class="kv" style="margin-top:8px">
+        <label>IMAP host</label><input type="text" id="s-imap-host" value="${esc(s.imap_host || "")}" placeholder="imap.gmail.com">
+        <label>Inbox email</label><input type="text" id="s-imap-user" value="${esc(s.imap_user || "")}" placeholder="you@company.com">
+        <label>App password</label><input type="password" id="s-imap-pass" value="${esc(s.imap_pass || "")}" placeholder="${s.imap_pass ? "saved (hidden)" : "Gmail: use an App Password, not your login password"}">
+      </div>
+      <div class="row" style="margin-top:8px"><button class="btn" id="s-imap-test">Test connection</button><span class="muted" id="s-imap-res"></span></div>
+      <div class="muted" style="margin-top:6px">${s.imap_last_check ? `Last checked ${esc(s.imap_last_check)}.` : "Not checked yet."}${s.imap_last_error ? ` Last error: ${esc(s.imap_last_error)}` : ""}</div>
+    </div>
     <div class="card"><h3>Data backup</h3>
       <div id="s-backup"><span class="muted">Loading…</span></div>
     </div>
@@ -1382,6 +1393,16 @@ async function renderSettings() {
   queries.forEach(qrow);
   $("#s-qadd").onclick = () => qrow({title: "", location: ""});
   $("#s-thr").oninput = (e) => $("#s-thrv").textContent = e.target.value;
+  $("#s-imap-test").onclick = async () => {
+    const res = $("#s-imap-res");
+    res.textContent = "connecting…";
+    try {
+      const r = await api("/api/settings/imap-test", {method: "POST",
+        body: JSON.stringify({host: $("#s-imap-host").value.trim(),
+          user: $("#s-imap-user").value.trim(), pass: $("#s-imap-pass").value})});
+      res.textContent = r.ok ? "Connected — inbox reachable." : "Failed: " + r.message;
+    } catch (e) { res.textContent = "Failed: " + e.message; }
+  };
   $("#s-save").onclick = async () => {
     const qs = $$("#s-queries .qrow").map((d) => ({
       title: $("input", d).value.trim(), location: $$("input", d)[1].value.trim(),
@@ -1405,9 +1426,13 @@ async function renderSettings() {
       max_queries: String(Math.max(1, Math.min(12, parseInt($("#s-maxq").value, 10) || 8))),
       adzuna_daily_budget: String(Math.max(0, Math.min(240, parseInt($("#s-adzbud").value, 10) || 0))),
       collect_emp_types: readEmp($("#s-emp"), "data-semp").join(","),
+      imap_enabled: $("#s-imap-on").checked ? "1" : "0",
+      imap_host: $("#s-imap-host").value.trim(),
+      imap_user: $("#s-imap-user").value.trim(),
+      imap_pass: $("#s-imap-pass").value,
     };
     // don't overwrite saved keys with the masked echo
-    for (const k of ["adzuna_app_key", "rapidapi_key", "llm_api_key"])
+    for (const k of ["adzuna_app_key", "rapidapi_key", "llm_api_key", "imap_pass"])
       if (payload[k].includes("***")) delete payload[k];
     await api("/api/settings", {method: "PUT", body: JSON.stringify(payload)});
     toast("Settings saved", "ok");

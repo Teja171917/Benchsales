@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import accounts, autolearn, contact as contact_mod, db, emptype, market, portals, usa, visa
 from app import assistant as assistant_mod
+from app import mailwatch as mailwatch_mod
 from app import coverletter as coverletter_mod
 from app import applyfill as applyfill_mod
 from app import matcher as matcher_mod
@@ -177,6 +178,21 @@ def _startup():
                 pass
     threading.Thread(target=_backfill_levels, daemon=True,
                      name="benchpilot-level-backfill").start()
+    # application-confirmation watcher: polls each workspace's connected
+    # inbox (Settings → Application inbox) and flips matched Queued cards
+    # to Applied. One workspace's mail problem never blocks the others.
+    def _mailwatch_loop():
+        time.sleep(90)
+        while True:
+            for path in db.all_paths():
+                try:
+                    with db.use(path):
+                        mailwatch_mod.poll_once()
+                except Exception:
+                    pass
+            time.sleep(15 * 60)
+    threading.Thread(target=_mailwatch_loop, daemon=True,
+                     name="benchpilot-mailwatch").start()
     t = threading.Thread(target=_auto_collect_loop, daemon=True,
                          name="benchpilot-auto-collect")
     t.start()
@@ -1628,7 +1644,7 @@ def api_update_application(aid: int, data: dict):
 
 
 # ---------- settings / sources ----------
-MASKED_KEYS = {"adzuna_app_key", "rapidapi_key", "llm_api_key", "google_api_key", "apify_token"}
+MASKED_KEYS = {"adzuna_app_key", "rapidapi_key", "llm_api_key", "google_api_key", "apify_token", "imap_pass"}
 
 
 def _mask(key: str, value: str) -> str:
@@ -1689,6 +1705,7 @@ def api_put_settings(request: Request, data: dict):
                "auto_queries", "max_queries", "auto_learn_skills",
                "adzuna_daily_budget", "tailor_cutoff", "tailor_max_per_run",
                "auto_queue_tailored",
+               "imap_enabled", "imap_host", "imap_user", "imap_pass",
                "resume_folder_url", "google_api_key", "resume_import_minutes"}
     for k, v in data.items():
         if k not in allowed:
@@ -1697,6 +1714,20 @@ def api_put_settings(request: Request, data: dict):
             continue  # masked value echoed back -> keep existing
         db.set_setting(k, v if isinstance(v, str) else json.dumps(v))
     return _settings_view()
+
+
+@app.post("/api/settings/imap-test")
+def api_imap_test(request: Request, data: dict):
+    """Try the application-inbox login with the given (or saved) details."""
+    _require_settings(request)
+    s = db.get_settings()
+    password = data.get("pass") or ""
+    if "***" in password:
+        password = s.get("imap_pass") or ""
+    ok, msg = mailwatch_mod.test_connection(
+        (data.get("host") or s.get("imap_host") or "imap.gmail.com").strip(),
+        (data.get("user") or s.get("imap_user") or "").strip(), password)
+    return {"ok": ok, "message": msg}
 
 
 @app.get("/api/sources/status")
