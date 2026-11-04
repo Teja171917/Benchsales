@@ -44,10 +44,11 @@ def test_w2_contract_tagging_stays_truthful():
 
 
 def test_emp_filter_excludes_unselected_engagement_models():
-    """The empPasses rule in app.js: a job whose engagement models are all
-    unselected is hidden even when a duration tag matches."""
+    """The empPasses rule in app.js (Teja's rule): ANY engagement tag
+    outside the selection hides the job — a W2 tag excludes it from a
+    C2C/Contract/C2H view even alongside selected tags."""
     js = (Path(__file__).resolve().parent.parent / "frontend" / "app.js").read_text()
-    assert "ENG_TAGS" in js and "eng.some" in js
+    assert "ENG_TAGS.includes(t) && !wanted.includes(t)" in js
 
 
 class BoardsAndBackfillTests(unittest.TestCase):

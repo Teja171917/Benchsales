@@ -168,13 +168,12 @@ const ENG_TAGS = ["fulltime", "c2c", "w2", "1099", "c2h"];
 function empPasses(tags, wanted, unspec) {
   if (!wanted.length) return true;
   if (!tags || !tags.length) return unspec;
-  // Engagement models are exclusive in a way duration words are not: a
-  // "W2 only" posting tagged [w2, contract] must not slip into a
-  // C2C/Contract view through its contract tag (RSATECH feedback, Nov 3
-  // 2026). Rule: when the job names engagement models, at least one of
-  // them must be selected; "contract"/"parttime" alone never exclude.
-  const eng = tags.filter((t) => ENG_TAGS.includes(t));
-  if (eng.length && !eng.some((t) => wanted.includes(t))) return false;
+  // Teja's rule (Nov 3 2026): the selection is exclusive. If a posting
+  // names ANY engagement type that is not selected — a "W2" or "Full-time"
+  // tag next to contract tags included — it does not belong in this view,
+  // even when it also carries a selected type ("C2C or W2" included).
+  // "contract"/"parttime" are duration/schedule words, never excluders.
+  if (tags.some((t) => ENG_TAGS.includes(t) && !wanted.includes(t))) return false;
   return tags.some((t) => wanted.includes(t));
 }
 
