@@ -166,6 +166,17 @@ def _startup():
                 pass
     threading.Thread(target=_backfill_auth, daemon=True,
                      name="benchpilot-auth-backfill").start()
+    # same for experience levels on jobs collected before the ladder existed
+    def _backfill_levels():
+        for path in db.all_paths():
+            try:
+                with db.use(path):
+                    while db.backfill_levels():
+                        time.sleep(0.25)
+            except Exception:
+                pass
+    threading.Thread(target=_backfill_levels, daemon=True,
+                     name="benchpilot-level-backfill").start()
     t = threading.Thread(target=_auto_collect_loop, daemon=True,
                          name="benchpilot-auto-collect")
     t.start()
@@ -1172,6 +1183,27 @@ def api_get_job(request: Request, jid: int):
     if not job:
         raise HTTPException(404, "job not found")
     return db._with_tags(job)
+
+
+_BOARDS_CACHE: list | None = None
+
+
+@app.get("/api/job-boards")
+def api_job_boards():
+    """The company websites & job portals list (Vijay's sheet, Nov 3 2026):
+    the staffing boards this team works, one click from the console. Many
+    of these firms' postings already reach the pool through the aggregator
+    sources; this directory is the canonical list for the team and the
+    backlog for dedicated per-board adapters."""
+    global _BOARDS_CACHE
+    if _BOARDS_CACHE is None:
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "data",
+                                   "job_boards.json")) as f:
+                _BOARDS_CACHE = json.load(f)
+        except Exception:
+            _BOARDS_CACHE = []
+    return {"boards": _BOARDS_CACHE}
 
 
 @app.get("/api/firms")

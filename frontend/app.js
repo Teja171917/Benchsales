@@ -133,6 +133,27 @@ const authSelectOptions = (cur) => `<option value=""${cur === "" ? " selected" :
   Object.entries(AUTH_LABELS).map(([k, label]) =>
     `<option value="${k}"${cur === k ? " selected" : ""}>${label}</option>`).join("") +
   `<option value="none"${cur === "none" ? " selected" : ""}>Not stated in posting</option>`;
+/* multi-select chip filters (testers asked for checkboxes, Nov 3 2026):
+   a row passes when its value is one of the ticked keys; no ticks = all;
+   the "none" key matches rows where the posting states nothing. */
+function multiPasses(value, selected) {
+  if (!selected || !selected.length) return true;
+  if (!value) return selected.includes("none");
+  return selected.includes(value);
+}
+const AUTH_KEYS = [...Object.keys(AUTH_LABELS), "none"];
+const authKeyLabel = (k) => (k === "none" ? "Not stated in posting" : AUTH_LABELS[k]);
+function authChipsHtml(selected, attr) {
+  return AUTH_KEYS.map((k) => `<label class="chip-toggle"><input type="checkbox" ${attr}="${k}"${selected.includes(k) ? " checked" : ""}><span>${esc(authKeyLabel(k))}</span></label>`).join("");
+}
+const LEVEL_LABELS = {intern: "Intern", entry: "Entry-Level", mid: "Mid-Level",
+  senior: "Senior", lead: "Lead", principal: "Principal", architect: "Architect-Level"};
+const LEVEL_KEYS = [...Object.keys(LEVEL_LABELS), "none"];
+const levelKeyLabel = (k) => (k === "none" ? "Not stated" : LEVEL_LABELS[k]);
+const levelBadge = (l) => (l && LEVEL_LABELS[l]) ? `<span class="chip">${LEVEL_LABELS[l]}</span>` : "";
+function levelChipsHtml(selected, attr) {
+  return LEVEL_KEYS.map((k) => `<label class="chip-toggle"><input type="checkbox" ${attr}="${k}"${selected.includes(k) ? " checked" : ""}><span>${esc(levelKeyLabel(k))}</span></label>`).join("");
+}
 function tagBadges(tags) {
   return (tags || []).map((t) => `<span class="tag tag-${esc(t)}">${esc(EMP_LABEL[t] || t)}</span>`).join("");
 }
@@ -143,9 +164,17 @@ function empChips(selected, attr) {
 function readEmp(root, attr) {
   return $$(`[${attr}]`, root).filter((c) => c.checked).map((c) => c.getAttribute(attr));
 }
+const ENG_TAGS = ["fulltime", "c2c", "w2", "1099", "c2h"];
 function empPasses(tags, wanted, unspec) {
   if (!wanted.length) return true;
   if (!tags || !tags.length) return unspec;
+  // Engagement models are exclusive in a way duration words are not: a
+  // "W2 only" posting tagged [w2, contract] must not slip into a
+  // C2C/Contract view through its contract tag (RSATECH feedback, Nov 3
+  // 2026). Rule: when the job names engagement models, at least one of
+  // them must be selected; "contract"/"parttime" alone never exclude.
+  const eng = tags.filter((t) => ENG_TAGS.includes(t));
+  if (eng.length && !eng.some((t) => wanted.includes(t))) return false;
   return tags.some((t) => wanted.includes(t));
 }
 
@@ -394,7 +423,7 @@ function jobDrawerHtml(j, opts) {
     <button class="drawer-close" aria-label="Close">✕</button>
     <div class="row" style="gap:8px;margin-bottom:10px">
       <span class="badge ${esc(j.source || "")}">${esc(j.source || "job")}</span>
-      ${j.remote_flag ? `<span class="badge">remote</span>` : ""}${tagBadges(j.emp_tags)}${authBadge(j.auth_tag)}</div>
+      ${j.remote_flag ? `<span class="badge">remote</span>` : ""}${tagBadges(j.emp_tags)}${authBadge(j.auth_tag)}${levelBadge(j.exp_level)}</div>
     <h2>${esc(j.title)}</h2>
     <div class="muted" style="margin-bottom:10px">${esc(j.company)}${j.location ? " · " + esc(j.location) : ""}</div>
     <div class="row" style="gap:14px;margin-bottom:6px">
@@ -448,7 +477,7 @@ async function openJobDrawer(job, opts) {
 
 /* ================= JOBS ================= */
 const jobsDefaults = () => ({source: "", q: "", remote: false, location: "", emp: EMP_DEFAULT.slice(),
-  unspec: true, posted: "", sort: "newest", auth: ""});
+  unspec: true, posted: "", sort: "newest", auths: [], levels: []});
 let jobsFilter = jobsDefaults();
 let jobsCache = [];
 let jobsShown = 100;
@@ -490,8 +519,10 @@ async function renderJobs() {
           <input type="text" id="j-q" placeholder="title, company, skills…" value="${esc(jobsFilter.q)}"></div>
         <div><label class="flabel" for="j-source">Source</label>
           <select id="j-source"><option value="">All sources</option></select></div>
-        <div><label class="flabel" for="j-auth">Work auth</label>
-          <select id="j-auth">${authSelectOptions(jobsFilter.auth)}</select></div>
+        <div id="j-authbar"><span class="flabel">Work auth — tick any</span>
+          <span class="chiprow" id="j-auth">${authChipsHtml(jobsFilter.auths, "data-jauth")}</span></div>
+        <div id="j-levelbar"><span class="flabel">Experience level — tick any</span>
+          <span class="chiprow" id="j-level">${levelChipsHtml(jobsFilter.levels, "data-jlevel")}</span></div>
         <div><label class="flabel" for="j-loc">Location</label>
           <input type="text" id="j-loc" placeholder="city, state…" value="${esc(jobsFilter.location)}"></div>
         <div><label class="flabel" for="j-posted">Posted</label>
@@ -535,7 +566,14 @@ async function renderJobs() {
   $("#j-q").addEventListener("input", jLive((v) => { jobsFilter.q = v; applyJobFilters(); }));
   $("#j-loc").addEventListener("input", jLive((v) => { jobsFilter.location = v; applyJobFilters(); }));
   $("#j-source").onchange = (e) => { jobsFilter.source = e.target.value; applyJobFilters(); };
-  $("#j-auth").onchange = (e) => { jobsFilter.auth = e.target.value; applyJobFilters(); };
+  $("#j-authbar").addEventListener("change", () => {
+    jobsFilter.auths = readEmp($("#j-auth"), "data-jauth");
+    applyJobFilters();
+  });
+  $("#j-levelbar").addEventListener("change", () => {
+    jobsFilter.levels = readEmp($("#j-level"), "data-jlevel");
+    applyJobFilters();
+  });
   $("#j-empbar").addEventListener("change", () => {
     jobsFilter.emp = readEmp($("#j-emp"), "data-jemp");
     jobsFilter.unspec = $("#j-unspec").checked;
@@ -547,7 +585,8 @@ async function renderJobs() {
   $("#j-reset").onclick = () => {
     jobsFilter = jobsDefaults();
     $("#j-q").value = ""; $("#j-loc").value = "";
-    const ja = $("#j-auth"); if (ja) ja.value = "";
+    $$("[data-jauth]").forEach((c) => c.checked = false);
+    $$("[data-jlevel]").forEach((c) => c.checked = false);
     $("#j-source").value = "";
     $$("[data-jemp]").forEach((c) => c.checked = jobsFilter.emp.includes(c.dataset.jemp));
     $("#j-unspec").checked = jobsFilter.unspec;
@@ -582,7 +621,7 @@ async function renderJobs() {
         <div class="card" style="padding:0"><table class="jobs">
           <tr><th>Title</th><th>Company</th><th>Location</th><th>Source</th><th></th></tr>
           ${liveResults.map((j, i) => `<tr data-liveidx="${i}">
-            <td><b>${esc(j.title)}</b>${j.salary ? `<div class="muted">${esc(j.salary)}</div>` : ""}<div>${tagBadges(j.emp_tags)}${authBadge(j.auth_tag)}</div></td>
+            <td><b>${esc(j.title)}</b>${j.salary ? `<div class="muted">${esc(j.salary)}</div>` : ""}<div>${tagBadges(j.emp_tags)}${authBadge(j.auth_tag)}${levelBadge(j.exp_level)}</div></td>
             <td>${esc(j.company)}</td>
             <td>${esc(j.location)}${j.remote_flag && !/remote/i.test(j.location || "") ? " (remote)" : ""}</td>
             <td><span class="badge ${esc(j.source)}">${esc(j.source)}</span></td>
@@ -662,7 +701,8 @@ async function loadJobs() {
 function jobMatches(j) {
   const f = jobsFilter;
   if (f.source && j.source !== f.source) return false;
-  if (f.auth === "none" ? !!j.auth_tag : (f.auth && j.auth_tag !== f.auth)) return false;
+  if (!multiPasses(j.auth_tag, f.auths)) return false;
+  if (!multiPasses(j.exp_level, f.levels)) return false;
   if (f.remote && !j.remote_flag) return false;
   if (!empPasses(j.emp_tags, f.emp, f.unspec)) return false;
   if (f.location && !(j.location || "").toLowerCase().includes(f.location.toLowerCase())) return false;
@@ -745,7 +785,7 @@ async function runCollection() {
 
 /* ================= MATCHES ================= */
 let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best",
-  emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: [], auth: ""};
+  emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: [], auths: [], levels: []};
 // the matches list is fetched ONCE per consultant/threshold choice and
 // kept here: city / sort / work-type / source clicks then filter this
 // copy instantly instead of re-downloading the whole list every time
@@ -804,8 +844,12 @@ async function renderMatches() {
       <span class="muted">pick any combination</span>
     </div>
     <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:10px"><b>Work auth</b>
-      <select id="mt-auth">${authSelectOptions(matchFilter.auth)}</select>
-      <span class="muted">what the posting states — citizen / GC / EAD / sponsorship</span>
+      <span class="chiprow" id="mt-auth">${authChipsHtml(matchFilter.auths, "data-mauth")}</span>
+      <span class="muted">tick any — what the posting states (citizen / GC / EAD / sponsorship)</span>
+    </div>
+    <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:10px"><b>Experience level</b>
+      <span class="chiprow" id="mt-level">${levelChipsHtml(matchFilter.levels, "data-mlevel")}</span>
+      <span class="muted">read from each posting's title and the years it asks for</span>
     </div>
     <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:10px"><b>Employment type</b>
       <span class="chiprow" id="mt-emp">${empChips(matchFilter.emp, "data-memp2")}</span>
@@ -824,7 +868,8 @@ async function renderMatches() {
   // city, sort and work type filter instantly, without the Apply button
   $("#mt-city").onchange = () => { matchFilter.city = $("#mt-city").value; loadMatches(); };
   $("#mt-sort").onchange = () => { matchFilter.sort = $("#mt-sort").value; loadMatches(); };
-  $("#mt-auth").onchange = () => { matchFilter.auth = $("#mt-auth").value; loadMatches(); };
+  $$("#mt-auth input[data-mauth]").forEach((c) => { c.onchange = () => { matchFilter.auths = readEmp($("#mt-auth"), "data-mauth"); loadMatches(); }; });
+  $$("#mt-level input[data-mlevel]").forEach((c) => { c.onchange = () => { matchFilter.levels = readEmp($("#mt-level"), "data-mlevel"); loadMatches(); }; });
   bindWorkChips();
   // The list loads FIRST. Each dropdown then fills on its own below:
   // sequential awaits here once meant one slow or failing call (a
@@ -889,8 +934,8 @@ function renderMatchCards() {
   ms = ms.filter((m) => empPasses(m.emp_tags, matchFilter.emp, matchFilter.unspec));
   if (matchFilter.city) ms = ms.filter((m) => cityOf(m) === matchFilter.city);
   if (matchFilter.work.length) ms = ms.filter((m) => matchFilter.work.includes(workTypeOf(m)));
-  if (matchFilter.auth === "none") ms = ms.filter((m) => !m.auth_tag);
-  else if (matchFilter.auth) ms = ms.filter((m) => m.auth_tag === matchFilter.auth);
+  ms = ms.filter((m) => multiPasses(m.auth_tag, matchFilter.auths));
+  ms = ms.filter((m) => multiPasses(m.exp_level, matchFilter.levels));
   const postedTs = (m) => { const t = Date.parse(m.posted_at || ""); return isNaN(t) ? 0 : t; };
   if (matchFilter.sort === "low") ms.sort((a, b) => a.score - b.score);
   else if (matchFilter.sort === "new") ms.sort((a, b) => (postedTs(b) - postedTs(a)) || (b.score - a.score));
@@ -903,7 +948,7 @@ function renderMatchCards() {
     <div class="card">
       <div class="row spread">
         <div><b>${esc(m.job_title)}</b><div class="muted">${esc(m.company)}${m.salary ? ` · 💰 ${esc(m.salary)}` : ""}${m.posted_at ? ` · 📅 posted ${esc(ago(m.posted_at))}` : ""}</div>
-          <div>${tagBadges(m.emp_tags)}${authBadge(m.auth_tag)}</div></div>
+          <div>${tagBadges(m.emp_tags)}${authBadge(m.auth_tag)}${levelBadge(m.exp_level)}</div></div>
         <span class="badge ${esc(m.source)}">${esc(m.source)}</span>
       </div>
       ${m.visa_ok === false ? `<div style="margin-top:6px;color:#d64545"><b>Visa conflict:</b> posting says “${esc(AUTH_LABELS[m.auth_tag] || m.auth_tag)}” — ${esc(m.consultant_name)} is ${esc(m.consultant_visa || "—")}</div>` : ""}
@@ -1383,6 +1428,10 @@ async function renderOverview() {
         <div style="margin-top:12px"><button class="btn" id="ov-collect">Run job collection</button></div></div>
     </div>
     <div class="card"><h3>Matches by consultant</h3><div id="ov-byc" class="muted">Loading…</div></div>
+    <div class="card"><div class="row spread"><h3 style="margin:0">Company job boards</h3><span class="muted" id="ov-boards-n"></span></div>
+      <div class="muted" style="margin:6px 0 10px">The staffing boards this team works (Vijay's list, added Nov 3). Many of these firms' postings already reach the pool through Dice, Adzuna and the other sources — this is the full directory, one click to each board.</div>
+      <input type="text" id="ov-boards-q" placeholder="Search boards…" style="width:100%;margin-bottom:10px">
+      <div id="ov-boards" class="muted">Loading…</div></div>
     <div class="card"><div class="row spread"><h3 style="margin:0">Top matches</h3>
       <button class="btn" id="ov-allm">View all</button></div>
       <div id="ov-top" style="margin-top:6px">${skelRows(3)}</div></div>
@@ -1391,11 +1440,12 @@ async function renderOverview() {
   $("#ov-allm").onclick = () => go("matches");
   $("#ov-collect").onclick = async () => { await runCollection(); renderOverview(); refreshBadges(); };
   try {
-    const [cs, jobs, ms, apps, st, srcst] = await Promise.all([
+    const [cs, jobs, ms, apps, st, srcst, boardsRes] = await Promise.all([
       api("/api/consultants"), api("/api/jobs/count"),
       api("/api/matches/summary"), api("/api/applications"),
       api("/api/collect/status").catch(() => null),
       api("/api/sources/status").catch(() => null),
+      api("/api/job-boards").catch(() => null),
     ]);
     const placed = apps.filter((a) => a.status === "placed").length;
     const active = apps.filter((a) => !["rejected", "withdrawn", "placed"].includes(a.status)).length;
@@ -1433,6 +1483,18 @@ async function renderOverview() {
       const okN = ran.length - bad.length;
       f.innerHTML += `<div style="margin-top:8px">Job sources: <b>${okN}/${ran.length} healthy</b>${bad.length ? ` — <span style="color:#d64545">${bad.map((s) => esc(s.name)).join(", ")} errored on the last run</span>` : " — every source pulled jobs on the last run"}</div>`;
     }
+    const boards = (boardsRes && boardsRes.boards) || [];
+    const drawBoards = (q) => {
+      const list = boards.filter((b) => !q || b.name.toLowerCase().includes(q.toLowerCase()));
+      $("#ov-boards-n").textContent = boards.length ? `${boards.length} boards` : "";
+      $("#ov-boards").innerHTML = list.length ? `<div class="chiprow">${list.map((b) => b.url
+        ? `<a class="chip" href="${esc(b.url)}" target="_blank" rel="noopener" style="text-decoration:none">${esc(b.name)} ↗</a>`
+        : `<span class="chip miss">${esc(b.name)}</span>`).join("")}</div>`
+        : "No boards match that search.";
+    };
+    drawBoards("");
+    const bq = $("#ov-boards-q");
+    if (bq) bq.oninput = () => drawBoards(bq.value.trim());
     const byc = {};
     (ms.by_consultant || []).forEach((r) => { byc[r.name] = r.n; });
     const maxByc = Math.max(1, ...Object.values(byc));

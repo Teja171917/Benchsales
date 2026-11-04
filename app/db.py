@@ -8,7 +8,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import emptype, visa
+from . import emptype, levels, visa
 from . import rules as rules_mod
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -322,6 +322,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE jobs ADD COLUMN emp_tags TEXT")
         if "auth_tag" not in _columns(conn, "jobs"):
             conn.execute("ALTER TABLE jobs ADD COLUMN auth_tag TEXT")
+        if "exp_level" not in _columns(conn, "jobs"):
+            conn.execute("ALTER TABLE jobs ADD COLUMN exp_level TEXT")
         if "emp_pref" not in _columns(conn, "consultants"):
             conn.execute("ALTER TABLE consultants ADD COLUMN emp_pref TEXT DEFAULT ''")
         if "user_confirmed_skills_json" not in _columns(conn, "tailored_resumes"):
@@ -641,6 +643,8 @@ def insert_job(job: dict) -> int | None:
         job.get("description", "")))
     auth_tag = visa.classify_auth(
         f"{job.get('title', '')}\n{job.get('description', '')}")
+    exp_level = levels.classify_level(
+        job.get("title", ""), job.get("description", ""))
     with get_conn() as conn:
         # fuzzy dedupe: same title + company + location already present from
         # any source. (Location is part of the key: staffing vendors post the
@@ -657,8 +661,8 @@ def insert_job(job: dict) -> int | None:
             cur = conn.execute(
                 """INSERT INTO jobs(source, source_id, title, company, location,
                    remote_flag, url, description, posted_at, salary,
-                   employment_type, emp_tags, fetched_at, auth_tag)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   employment_type, emp_tags, fetched_at, auth_tag, exp_level)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job.get("source", ""),
                     job.get("source_id", ""),
@@ -674,6 +678,7 @@ def insert_job(job: dict) -> int | None:
                     tags,
                     now_iso(),
                     auth_tag,
+                    exp_level,
                 ),
             )
             conn.commit()
@@ -691,7 +696,7 @@ def _with_tags(row: dict) -> dict:
 # (the bulk of every row) is fetched per job when its drawer opens
 LIGHT_JOB_COLUMNS = ("id, source, title, company, location, remote_flag, "
                      "url, posted_at, fetched_at, salary, "
-                     "employment_type, emp_tags, auth_tag")
+                     "employment_type, emp_tags, auth_tag, exp_level")
 
 
 def list_jobs(source: str = "", q: str = "", limit: int = 50,
@@ -771,7 +776,7 @@ def list_matches(consultant_id: int | None = None,
                  min_score: float = 0) -> list:
     sql = ('SELECT m.*, j.title AS job_title, j.company, j.location, j.url, '
            'j.source, j.posted_at, j.salary, j.employment_type, j.emp_tags, '
-           'j.remote_flag, j.auth_tag, c.name AS consultant_name, '
+           'j.remote_flag, j.auth_tag, j.exp_level, c.name AS consultant_name, '
            'c.visa_status AS consultant_visa '
            'FROM "matches" m JOIN jobs j ON j.id=m.job_id '
            'JOIN consultants c ON c.id=m.consultant_id WHERE m.score >= ?')
@@ -810,6 +815,24 @@ def backfill_auth_tags(batch: int = 500) -> int:
         with get_conn() as conn:
             conn.executemany(
                 "UPDATE jobs SET auth_tag=? WHERE id=?",
+                tagged[i:i + 50])
+    return len(rows)
+
+
+def backfill_levels(batch: int = 500) -> int:
+    """Classify the experience level of jobs whose exp_level is still NULL.
+    Same contract as backfill_auth_tags: chunked commits, idempotent."""
+    with get_conn() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT id, title, description FROM jobs "
+            "WHERE exp_level IS NULL LIMIT ?", (batch,)).fetchall()]
+    tagged = [(levels.classify_level(r["title"] or "",
+                                     r["description"] or ""), r["id"])
+              for r in rows]
+    for i in range(0, len(tagged), 50):
+        with get_conn() as conn:
+            conn.executemany(
+                "UPDATE jobs SET exp_level=? WHERE id=?",
                 tagged[i:i + 50])
     return len(rows)
 
