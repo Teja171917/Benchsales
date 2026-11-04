@@ -30,9 +30,10 @@ def test_slower_choice_is_respected(monkeypatch):
 
 
 def test_office_due_gate():
+    """Office runs every 15 minutes (Teja's call, Nov 4 2026 — was 4h)."""
     from app.server import _office_due
     now = datetime(2026, 11, 2, 22, 0, tzinfo=timezone.utc)
     assert _office_due("", now) is True
     assert _office_due("garbage", now) is True
-    assert _office_due((now - timedelta(hours=1)).isoformat(), now) is False
-    assert _office_due((now - timedelta(hours=5)).isoformat(), now) is True
+    assert _office_due((now - timedelta(minutes=10)).isoformat(), now) is False
+    assert _office_due((now - timedelta(minutes=16)).isoformat(), now) is True

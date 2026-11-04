@@ -679,12 +679,12 @@ def _auto_collect_loop():
         time.sleep(30)
 
 
-OFFICE_EVERY_HOURS = 4
+OFFICE_EVERY_MINUTES = 15
 
 
 def _office_due(last_iso: str, now) -> bool:
     """The office is due when it has never run or its last run is at least
-    OFFICE_EVERY_HOURS old."""
+    OFFICE_EVERY_MINUTES old."""
     if not last_iso:
         return True
     try:
@@ -693,26 +693,50 @@ def _office_due(last_iso: str, now) -> bool:
             last = last.replace(tzinfo=timezone.utc)
     except ValueError:
         return True
-    return (now - last) >= timedelta(hours=OFFICE_EVERY_HOURS)
+    return (now - last) >= timedelta(minutes=OFFICE_EVERY_MINUTES)
+
+
+_office_lock = threading.Lock()
+
+
+def _office_thread(path):
+    try:
+        with db.use(path):
+            office_mod.run_and_store()
+    except Exception:
+        pass  # a failed run is recorded by run_and_store; never crash the loop
+    finally:
+        _office_lock.release()
+
+
+def _start_office_run(path) -> bool:
+    """Start an office run on a background thread. Office runs take
+    minutes at real bench scale (Tailor drafts, link checks); running
+    one inline blocked the scheduler loop AND the Run button's request
+    for the whole duration — the "backend loading" stall. One run at a
+    time across all workspaces; returns False if one is already going."""
+    if not _office_lock.acquire(blocking=False):
+        return False
+    threading.Thread(target=_office_thread, args=(path,), daemon=True).start()
+    return True
 
 
 def _maybe_run_office():
-    """Run the Agent Office every few hours so its briefing tracks the
-    hourly job refresh instead of going a full day stale. Safe at this
-    cadence: Watchdog notes are written once per stale episode, and
-    Tailor only drafts for matches it has not already drafted."""
+    """Run the Agent Office every 15 minutes so its briefing tracks the
+    pipeline closely. Safe at this cadence: Watchdog notes are written
+    once per stale episode, link checks rotate across the queue, Tailor
+    only drafts for matches it has not already drafted, and the Market
+    Analyst's query expansions are recorded so they never repeat."""
     if not _office_due(db.get_setting("office_last_run_at", "") or "",
                        datetime.now(timezone.utc)):
         return
-    try:
-        office_mod.run_and_store()
-    except Exception:
-        pass  # never let the office break the scheduler loop
+    _start_office_run(db.current_path())
 
 
 @app.post("/api/office/run")
 def api_office_run():
-    return office_mod.run_and_store()
+    started = _start_office_run(db.current_path())
+    return {"started": started, "running": True}
 
 
 @app.get("/api/office/briefing")

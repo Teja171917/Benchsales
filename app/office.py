@@ -25,8 +25,8 @@ recruiting pipeline keeps moving while the team is away:
                   posting; H1B consultant vs "US citizens only" posting)
 
 run_office() executes all agents and returns a briefing dict. The server
-scheduler runs it once a day and stores the briefing; the Office tab
-displays it.
+scheduler runs it every 15 minutes (on a background thread) and stores
+the briefing; the Office tab displays it.
 
 Autopilot (on by default, toggleable): agents don't just report - they fix
 safe issues themselves. Compliance quarantines mismatched matches,
@@ -326,7 +326,18 @@ def _watchdog(settings=None):
     # any database work; notes are one small commit each.
     dead_items = []
     links = {"checked": 0, "dead": 0, "unknown": 0}
-    targets = [a for a in queued_apps if a.get("url")][:LINK_CHECKS_PER_RUN]
+    # Rotate: check the least-recently-checked cards first, so at the
+    # 15-minute cadence the whole queue gets re-verified over a few
+    # runs instead of the same first 20 cards every time.
+    try:
+        checked_map = json.loads(db.get_setting("watchdog_link_checks") or "{}")
+        if not isinstance(checked_map, dict):
+            checked_map = {}
+    except (json.JSONDecodeError, TypeError):
+        checked_map = {}
+    targets = sorted((a for a in queued_apps if a.get("url")),
+                     key=lambda a: checked_map.get(str(a["id"]), "")
+                     )[:LINK_CHECKS_PER_RUN]
     if targets:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=5) as pool:
@@ -360,6 +371,15 @@ def _watchdog(settings=None):
                     })
                 except Exception:
                     pass
+        stamp = _now().isoformat()
+        live_ids = {str(a["id"]) for a in queued_apps}
+        checked_map = {k: v for k, v in checked_map.items() if k in live_ids}
+        for a in targets:
+            checked_map[str(a["id"])] = stamp
+        try:
+            db.set_setting("watchdog_link_checks", json.dumps(checked_map))
+        except Exception:
+            pass
     return {"stale": len(stale), "items": stale, "actions": actions,
             "links_checked": links["checked"], "links_dead": links["dead"],
             "links_unknown": links["unknown"], "dead_items": dead_items}
