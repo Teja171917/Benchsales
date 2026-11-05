@@ -118,11 +118,29 @@ def _prepare_all(deadline: float | None = None) -> tuple[list, dict]:
                               "prepare phase budget"}
             except Exception as e:  # noqa: BLE001 - never block job collection
                 maintained = {"error": str(e)}
+            # stored-pool sweep (Nov 5 2026): the fetch filter only
+            # guards the door — jobs already inside (Arbeitnow-era rows,
+            # bare foreign cities the filter once let through) are
+            # deleted here, per workspace, when its usa_only is on.
+            purged = {"jobs": 0, "matches": 0}
+            if db.get_settings().get("usa_only", "1") == "1":
+                try:
+                    if deadline is not None:
+                        matcher.check_deadline(deadline)
+                    purged = db.purge_non_us_jobs()
+                except matcher.PhaseTimeout:
+                    maintained["partial"] = (
+                        "stopped at the "
+                        f"{PHASE_BUDGET_SECONDS['prepare'] // 60}-minute "
+                        "prepare phase budget")
+                except Exception as e:  # noqa: BLE001 - never block collection
+                    purged = {"jobs": 0, "matches": 0, "error": str(e)}
             own = autolearn.queries_for_run(db.get_settings())
             has_people = bool(db.consultants_with_resumes())
         per_db[str(path)] = {"queries": own if has_people else [],
                              "learned_skills": maintained.get("learned", []),
                              "rescored": maintained.get("rescored", 0),
+                             "purged_non_us": purged,
                              "matches_new": 0}
         if maintained.get("partial"):
             per_db[str(path)]["maintain_partial"] = maintained["partial"]

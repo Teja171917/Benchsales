@@ -8,7 +8,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import emptype, levels, visa
+from . import emptype, levels, usa, visa
 from . import rules as rules_mod
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -795,6 +795,52 @@ def list_matches(consultant_id: int | None = None,
         r["visa_ok"] = visa.compatible(r.get("consultant_visa") or "",
                                         r.get("auth_tag") or "")
     return rows
+
+
+# Sources retired by the US-only decision (Nov 4 2026). Their adapters
+# are unwired, but rows they collected earlier still sit in the pool;
+# the sweep below removes them whatever their location string says
+# (an Arbeitnow "Remote job" row is a German board's posting even when
+# its location field never names a place).
+DEAD_SOURCES = ("arbeitnow", "remoteok", "remotive")
+
+
+def purge_non_us_jobs(batch: int = 50) -> dict:
+    """Delete stored jobs that fail the US filter, plus every job from
+    a retired non-US board. Runs on the CURRENT database (the collector
+    calls it per workspace during prepare, when that workspace's
+    usa_only setting is on), so the pool self-cleans every run instead
+    of only being filtered at the fetch door.
+
+    Deleting a job cascades to its matches, queue entries, tailored
+    resumes and cover letters (foreign_keys pragma is on). Commits in
+    small batches so the sweep never holds the write lock long.
+    Returns {"jobs": n, "matches": m} actually removed."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, location, source FROM jobs").fetchall()
+    doomed = [r["id"] for r in rows
+              if r["source"] in DEAD_SOURCES
+              or not usa.is_us_job({"location": r["location"] or ""})]
+    removed_jobs = removed_matches = 0
+    for i in range(0, len(doomed), batch):
+        chunk = doomed[i:i + batch]
+        marks = ",".join("?" * len(chunk))
+        with get_conn() as conn:
+            removed_matches += conn.execute(
+                f"SELECT COUNT(*) FROM matches WHERE job_id IN ({marks})",
+                chunk).fetchone()[0]
+            conn.execute(f"DELETE FROM jobs WHERE id IN ({marks})", chunk)
+        removed_jobs += len(chunk)
+    if removed_jobs:
+        log_activity(
+            "collect",
+            f"Purged {removed_jobs} non-US jobs "
+            f"({removed_matches} matches removed)",
+            actor="system",
+            detail="Stored-pool sweep: jobs failing the US filter or "
+                   "from retired boards (arbeitnow/remoteok/remotive).")
+    return {"jobs": removed_jobs, "matches": removed_matches}
 
 
 def backfill_auth_tags(batch: int = 500) -> int:

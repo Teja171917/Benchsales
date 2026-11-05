@@ -69,7 +69,25 @@ _NON_US = re.compile(
     r"auckland|peru|lima|bogota|santiago|buenos aires|sao paulo|"
     r"mexico city|morocco|ghana|ethiopia|saudi arabia|qatar|riyadh|"
     r"tel aviv|istanbul|ankara|karachi|lahore|islamabad|jakarta|manila|"
-    r"hanoi|ho chi minh|remoto)\b|\b\w+-ii\b", re.I)
+    r"hanoi|ho chi minh|remoto|"
+    # bare foreign city names harvested from the live pool (Nov 5 2026):
+    # postings that name only the city, with no country attached, used to
+    # fall through as "unknown — keep". A US state marker still wins
+    # first (has_us_marker runs before this list), so "Manchester, NH",
+    # "Vienna, VA" and "Bern, KS" stay US jobs.
+    r"munich|münchen|hamburg|cologne|köln|frankfurt|stuttgart|leipzig|"
+    r"nuremberg|nürnberg|mannheim|heidelberg|darmstadt|bremen|bochum|"
+    r"aachen|dresden|hannover|essen|dortmund|bonn|freiburg|karlsruhe|"
+    r"wiesbaden|augsburg|mainz|ulm|kiel|magdeburg|erfurt|osnabrück|"
+    r"zurich|zürich|nyon|basel|lausanne|lucerne|lugano|genève|bern|"
+    r"winterthur|utrecht|eindhoven|rotterdam|groningen|maastricht|"
+    r"tilburg|den haag|the hague|manchester|leeds|glasgow|bristol|"
+    r"cardiff|edinburgh|liverpool|sheffield|milton keynes|wales|"
+    r"vienna|salzburg|graz|innsbruck|linz|strasbourg|lille|toulouse|"
+    r"montpellier|grenoble|nantes|bordeaux|marseille|antwerp|ghent|"
+    r"krakow|gdansk|wroclaw|poznan|bucharest|zagreb|ljubljana|"
+    r"medellin|havana|cuba|bolivia|westphalia|homeoffice)\b|"
+    r"\b\w+-ii\b", re.I)
 _STATE_ABBR = re.compile(r",\s*([A-Z]{2})\b")
 _STATE_NAME = re.compile(r"\b(" + "|".join(STATE_NAMES) + r")\b", re.I)
 _WORLDWIDE = re.compile(r"\b(worldwide|anywhere|global|international)\b", re.I)
