@@ -1477,8 +1477,11 @@ def api_list_matches(consultant_id: int = 0, min_score: float = 0):
     that is also running collections and the Agent Office — under that
     contention the endpoint measured 7-39s while sibling endpoints
     answered in ~1s. Match rows only change when a collection or the
-    office runs, so a 60-second per-workspace cache is invisible to
-    users and turns repeat opens into a memory hit."""
+    office runs, so a 5-minute per-workspace cache is invisible to
+    users and turns repeat opens into a memory hit. (Was 60s until
+    Nov 5 2026: at a 60s TTL the first filter click of every minute
+    still paid the cold rebuild, which is exactly the click users
+    make most.)"""
     key = (str(db.current_path()), consultant_id, min_score)
     now = time.time()
     hit = _matches_cache.get(key)
@@ -1488,7 +1491,7 @@ def api_list_matches(consultant_id: int = 0, min_score: float = 0):
     confirmed = db.confirmed_cities()
     for m in rows:
         m["city"] = db.city_of_location(m.get("location") or "", confirmed)
-    _matches_cache[key] = (now + 60, rows)
+    _matches_cache[key] = (now + 300, rows)
     return rows
 
 

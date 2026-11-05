@@ -21,8 +21,12 @@ def _render_matches_body() -> str:
 class MatchesViewResilienceTests(unittest.TestCase):
     def test_list_loads_before_any_dropdown_fill(self):
         body = _render_matches_body()
-        self.assertIn("loadMatches(true)", body)
-        self.assertLess(body.index("loadMatches(true)"),
+        # the list load is kicked off before any dropdown fill; since
+        # the Nov 5 2026 fetch-once change it is loadMatches() (which
+        # refetches only when the cached copy is empty or stale), not
+        # a forced reload on every tab entry
+        self.assertIn("loadMatches();", body)
+        self.assertLess(body.index("loadMatches();"),
                         body.index('api("/api/consultants")'))
 
     def test_no_gating_awaits(self):

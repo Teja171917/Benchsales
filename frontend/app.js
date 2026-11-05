@@ -812,10 +812,11 @@ async function runCollection() {
 /* ================= MATCHES ================= */
 let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best",
   emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: [], auths: [], levels: []};
-// the matches list is fetched ONCE per consultant/threshold choice and
-// kept here: city / sort / work-type / source clicks then filter this
-// copy instantly instead of re-downloading the whole list every time
-let matchesCache = {key: null, rows: null};
+// the matches list is fetched ONCE (all consultants, threshold 0) and
+// kept here: EVERY filter — consultant and threshold included — then
+// filters this copy locally instead of re-downloading the whole list
+// (and paying a cold server rebuild) on every filter change
+let matchesCache = {rows: null, at: 0};
 let matchShowCount = 100;
 function cityOf(m) {
   if (m.city !== undefined && m.city !== null) return m.city;
@@ -901,8 +902,9 @@ async function renderMatches() {
   // sequential awaits here once meant one slow or failing call (a
   // locked database made /api/consultants 500) killed the handlers,
   // the list, and every filter after it — the consultant filter
-  // simply never appeared.
-  loadMatches(true);
+  // simply never appeared. Re-entering the tab reuses the loaded copy
+  // (loadMatches refetches only when it is empty or 5+ minutes old).
+  loadMatches();
   api("/api/consultants").then((cs) => {
     $("#mt-c").innerHTML = `<option value="">All consultants</option>` +
       cs.map((c) => `<option value="${c.id}"${String(c.id) === String(matchFilter.consultant_id) ? " selected" : ""}>${esc(c.name)}</option>`).join("");
@@ -923,15 +925,14 @@ async function renderMatches() {
 }
 async function loadMatches(force) {
   matchShowCount = 100;
-  const key = `${matchFilter.consultant_id}|${matchFilter.min_score || 0}`;
-  if (force || !matchesCache.rows || matchesCache.key !== key) {
+  // Refetch only when forced, when nothing is loaded yet, or when the
+  // copy is older than 5 minutes (mirroring the server cache). Filter
+  // changes — consultant and threshold included — NEVER refetch: the
+  // full list is already here and renderMatchCards filters it locally.
+  if (force || !matchesCache.rows || Date.now() - matchesCache.at > 5 * 60 * 1000) {
     const el = $("#mt-list");
     el.innerHTML = skelCards(6);
-    // only send consultant_id when one is chosen: an empty "consultant_id="
-    // is not a valid integer and strict API validation would reject it
-    const mq = new URLSearchParams({min_score: String(matchFilter.min_score || 0)});
-    if (matchFilter.consultant_id) mq.set("consultant_id", matchFilter.consultant_id);
-    matchesCache = {key, rows: await api(`/api/matches?${mq}`)};
+    matchesCache = {rows: await api("/api/matches?min_score=0"), at: Date.now()};
   }
   renderMatchCards();
 }
@@ -955,6 +956,8 @@ function bindWorkChips() {
 function renderMatchCards() {
   const el = $("#mt-list");
   let ms = [...(matchesCache.rows || [])];
+  if (matchFilter.consultant_id) ms = ms.filter((m) => String(m.consultant_id) === String(matchFilter.consultant_id));
+  if (matchFilter.min_score) ms = ms.filter((m) => m.score >= matchFilter.min_score);
   if (matchFilter.source) ms = ms.filter((m) => m.source === matchFilter.source);
   const total = ms.length;
   ms = ms.filter((m) => empPasses(m.emp_tags, matchFilter.emp, matchFilter.unspec));
