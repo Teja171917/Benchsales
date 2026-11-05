@@ -749,7 +749,9 @@ async function updateFreshness() {
   try {
     const st = await api("/api/collect/status");
     if (st.running) {
-      f.textContent = "Collection running right now…";
+      f.textContent = st.phase
+        ? `Collection running right now — ${st.phase} phase (${st.phase_seconds || 0}s in)…`
+        : "Collection running right now…";
       return;
     }
     const last = st.last_result
@@ -781,7 +783,7 @@ async function runCollection() {
       st = await api("/api/collect/status").catch(() => null);
       if (st && !st.running && st.last_result) break;
       if (prog && st) prog.querySelector(".muted").textContent =
-        `Collecting… still running (${Math.round((i + 1) * 3)}s) — sources answer at very different speeds.`;
+        `Collecting… still running (${Math.round((i + 1) * 3)}s)${st.phase ? ` — ${st.phase} phase` : ""} — sources answer at very different speeds.`;
     }
     if (st && st.last_result) {
       const lr = st.last_result;
@@ -791,7 +793,9 @@ async function runCollection() {
         lines = srcs.filter((x) => x.last_run && x.last_run.status).map((x) =>
           `${x.name}: ${x.last_run.status}${x.last_run.status === "ok" ? ` — found ${x.last_run.jobs || 0}, ${x.last_run.new || 0} new` : ""}`);
       } catch (e) { /* lines are a nicety */ }
-      say(`<div class="okbox">Done — ${lr.jobs_new || 0} new jobs, ${lr.matches_new || 0} new matches.<br>${lines.map(esc).join("<br>")}</div>`);
+      const phaseLine = lr.phases ? Object.entries(lr.phases).map(([k, v]) =>
+        `${k} ${v.seconds}s${v.status && v.status !== "ok" ? ` (${v.status})` : ""}`).join(" · ") : "";
+      say(`<div class="okbox">Done — ${lr.jobs_new || 0} new jobs, ${lr.matches_new || 0} new matches.${phaseLine ? `<br>Phases: ${esc(phaseLine)}` : ""}<br>${lines.map(esc).join("<br>")}</div>`);
       if (!prog) toast(`Done — ${lr.jobs_new || 0} new jobs, ${lr.matches_new || 0} new matches`, "ok");
     } else {
       say(`<div class="muted">The collection is taking longer than usual — it's still running in the background and the freshness line above will update when it lands.</div>`);

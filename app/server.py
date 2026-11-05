@@ -604,6 +604,7 @@ def _do_collect() -> dict:
     _collect_status["last_result"] = {
         "jobs_new": summary.get("jobs_new", 0),
         "matches_new": summary.get("matches_new", 0),
+        "phases": summary.get("phases", {}),
         "errors": summary.get("errors", []),
         "learned_skills": summary.get("learned_skills", []),
         "rescored": summary.get("rescored", 0),
@@ -832,10 +833,25 @@ def api_collect_status():
         wanted = 0
     interval = autolearn.effective_interval_minutes(settings)
     queries = autolearn.queries_for_run(settings)
+    # which phase a running collection is in, and for how long — a slow
+    # run must say WHERE it is, not just "running" (Nov 4 2026)
+    phase = phase_seconds = None
+    if _collect_status["running"]:
+        try:
+            import collector as _collector
+            phase = _collector.PROGRESS.get("phase")
+            started = _collector.PROGRESS.get("phase_started")
+            if phase and started:
+                phase_seconds = round((datetime.now(timezone.utc) - datetime
+                                       .fromisoformat(started)).total_seconds())
+        except Exception:  # noqa: BLE001 - status must never fail on this
+            phase = phase_seconds = None
     return {
         "interval_minutes": interval,
         "interval_wanted": wanted,
         "running": _collect_status["running"],
+        "phase": phase,
+        "phase_seconds": phase_seconds,
         "last_run_at": _collect_status["last_run_at"] or (
             _main_setting("last_collect_at") or None),
         "next_run_at": _collect_status["next_run_at"] if interval > 0 else None,

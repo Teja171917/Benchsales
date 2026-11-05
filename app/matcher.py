@@ -1,12 +1,27 @@
 """Consultant <-> job scoring for BenchPilot (0-100)."""
 import json
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 from . import db, emptype
 from .usa import STATE_ABBR_TO_NAME
 from .skills import extract_skills, requirements_skills
+
+
+class PhaseTimeout(Exception):
+    """A collection phase ran past its wall-clock budget. Raised by the
+    long scoring loops below when the caller passes a deadline; the
+    collector catches it, marks the phase partial in the run summary and
+    still finishes the run (Nov 4 2026: an unbounded tail phase wedged
+    collections for hours, silently)."""
+
+
+def check_deadline(deadline: float | None) -> None:
+    """Raise PhaseTimeout when a monotonic deadline has passed."""
+    if deadline is not None and time.monotonic() > deadline:
+        raise PhaseTimeout("phase time budget reached")
 
 STOPWORDS = {"a", "an", "the", "and", "or", "of", "for", "to", "in", "on",
              "at", "with", "sr", "senior", "junior", "jr", "ii", "iii", "iv",
@@ -339,11 +354,14 @@ def _same_job_key(job: dict | None) -> tuple:
 
 
 def run_all(threshold: float | None = None,
-            consultant_id: int | None = None) -> int:
+            consultant_id: int | None = None,
+            deadline: float | None = None) -> int:
     """Score every consultant with a resume against every job; insert new
     matches at/above threshold. Returns number of new matches. Pass
     consultant_id to score just that one consultant (used right after a
-    resume upload)."""
+    resume upload). With a monotonic deadline, raises PhaseTimeout when
+    the phase budget is spent; matches already inserted stay inserted."""
+    check_deadline(deadline)
     if threshold is None:
         try:
             threshold = float(db.get_setting("match_threshold", "60"))
@@ -361,8 +379,12 @@ def run_all(threshold: float | None = None,
     jobs_by_id = {j["id"]: j for j in jobs}
     seen_role = {(cid, _same_job_key(jobs_by_id.get(jid))) for cid, jid in existing
                  if jid in jobs_by_id}
+    pairs = 0
     for c in consultants:
         for j in jobs:
+            pairs += 1
+            if pairs % 512 == 0:
+                check_deadline(deadline)
             if (c["id"], j["id"]) in existing:
                 continue
             key = (c["id"], _same_job_key(j))
@@ -379,10 +401,14 @@ def run_all(threshold: float | None = None,
     return new
 
 
-def rescore_existing(consultant_id: int | None = None) -> int:
+def rescore_existing(consultant_id: int | None = None,
+                     deadline: float | None = None) -> int:
     """Recompute the score of matches that already exist (the skill list or a
     resume changed). Only updates numbers - never deletes a match, because an
-    application may depend on it. Returns how many scores changed."""
+    application may depend on it. Returns how many scores changed. With a
+    monotonic deadline, raises PhaseTimeout when the budget is spent;
+    scores already updated stay updated."""
+    check_deadline(deadline)
     consultants = {c["id"]: c for c in db.consultants_with_resumes()}
     with db.get_conn() as conn:
         jobs = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM jobs")}
@@ -390,7 +416,9 @@ def rescore_existing(consultant_id: int | None = None) -> int:
             'SELECT id, consultant_id, job_id, score, score_breakdown_json, '
             'missing_skills_json FROM "matches"')]
     changed = 0
-    for m in rows:
+    for i, m in enumerate(rows):
+        if i % 512 == 0:
+            check_deadline(deadline)
         if consultant_id is not None and m["consultant_id"] != consultant_id:
             continue
         c, j = consultants.get(m["consultant_id"]), jobs.get(m["job_id"])
@@ -404,10 +432,13 @@ def rescore_existing(consultant_id: int | None = None) -> int:
     return changed
 
 
-def prune_misfits() -> int:
+def prune_misfits(deadline: float | None = None) -> int:
     """Remove matches that fail the role check (see fits_role) and that nobody
     has used: no application, tailored resume or outreach draft depends on
-    them. Returns how many were removed."""
+    them. Returns how many were removed. With a monotonic deadline, raises
+    PhaseTimeout when the budget is spent; nothing is deleted in that case
+    (the delete happens once, at the end)."""
+    check_deadline(deadline)
     consultants = {c["id"]: c for c in db.consultants_with_resumes()}
     with db.get_conn() as conn:
         jobs = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM jobs")}
@@ -418,7 +449,9 @@ def prune_misfits() -> int:
             'AND NOT EXISTS (SELECT 1 FROM outreach_drafts o WHERE o.match_id=m.id)')]
     drop = []
     best: dict = {}
-    for m in rows:
+    for i, m in enumerate(rows):
+        if i % 512 == 0:
+            check_deadline(deadline)
         c, j = consultants.get(m["consultant_id"]), jobs.get(m["job_id"])
         if not c or not j:
             continue

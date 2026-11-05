@@ -6,6 +6,7 @@ run matcher for all consultants. Idempotent: safe to re-run.
 """
 import json
 import sys
+import time
 import traceback
 from datetime import datetime, timezone
 
@@ -26,6 +27,36 @@ SOURCES = [adzuna, jsearch, dice, monster, smartrecruiters, phenom]
 # no collections finished and, because the office rode the same loop,
 # no office runs either).
 SOURCE_BUDGET_SECONDS = 240
+
+# The fetch loop is not the whole run: the phases before and after it
+# (learning/rescoring searches in prepare; vocabulary sync, misfit
+# pruning and matching in match) loop over every consultant x job pair
+# and every stored match, and on Nov 4 2026 a run sat in that tail for
+# 40+ minutes after every source had reported — status showed nothing
+# but "running". Each phase now gets its own wall-clock budget too: a
+# phase that spends it is cut, NAMED in the run summary (summary
+# ["phases"]), and the run still finishes and reports.
+PHASE_BUDGET_SECONDS = {"prepare": 240, "match": 600}
+
+# Live progress for /api/collect/status: which phase is running and
+# since when, so a slow run shows WHERE it is instead of just "running".
+PROGRESS = {"phase": None, "phase_started": None, "run_started": None}
+
+
+def _begin_phase(phases: dict, name: str) -> float:
+    PROGRESS["phase"] = name
+    PROGRESS["phase_started"] = datetime.now(timezone.utc).isoformat()
+    if PROGRESS["run_started"] is None:
+        PROGRESS["run_started"] = PROGRESS["phase_started"]
+    return time.monotonic()
+
+
+def _end_phase(phases: dict, name: str, started: float,
+               status: str = "ok") -> None:
+    phases[name] = {
+        "seconds": round(time.monotonic() - started, 1), "status": status}
+    PROGRESS["phase"] = None
+    PROGRESS["phase_started"] = None
 
 
 def jsearch_room(settings: dict) -> tuple[int, int]:
@@ -68,16 +99,23 @@ def _merge(queries: list, more: list) -> None:
             queries.append(q)
 
 
-def _prepare_all() -> tuple[list, dict]:
+def _prepare_all(deadline: float | None = None) -> tuple[list, dict]:
     """Learn from every database's resumes and collect the searches they need.
-    Returns (all searches, {database: its own part})."""
+    Returns (all searches, {database: its own part}). Maintenance is capped
+    by the phase deadline: a database whose upkeep spends the budget is
+    noted and skipped, but its searches are still collected — stale skills
+    must never block job collection."""
     queries, per_db = [], {}
     for path in db.all_paths():
         with db.use(path):
             if not path.exists():
                 db.init_db()
             try:
-                maintained = autolearn.maintain()
+                maintained = autolearn.maintain(deadline=deadline)
+            except matcher.PhaseTimeout:
+                maintained = {"partial": "stopped at the "
+                              f"{PHASE_BUDGET_SECONDS['prepare'] // 60}-minute "
+                              "prepare phase budget"}
             except Exception as e:  # noqa: BLE001 - never block job collection
                 maintained = {"error": str(e)}
             own = autolearn.queries_for_run(db.get_settings())
@@ -86,6 +124,8 @@ def _prepare_all() -> tuple[list, dict]:
                              "learned_skills": maintained.get("learned", []),
                              "rescored": maintained.get("rescored", 0),
                              "matches_new": 0}
+        if maintained.get("partial"):
+            per_db[str(path)]["maintain_partial"] = maintained["partial"]
         if has_people:
             _merge(queries, own)
     if not queries:   # nobody has a resume yet: the main database's searches
@@ -112,7 +152,16 @@ def run() -> dict:
 
 
 def _run() -> dict:
-    queries, per_db = _prepare_all()
+    phases: dict = {}
+    t = _begin_phase(phases, "prepare")
+    prepare_deadline = time.monotonic() + PHASE_BUDGET_SECONDS["prepare"]
+    queries, per_db = _prepare_all(deadline=prepare_deadline)
+    prepare_status = "ok"
+    if any(p.get("maintain_partial") for p in per_db.values()):
+        prepare_status = ("partial: maintenance stopped at the "
+                          f"{PHASE_BUDGET_SECONDS['prepare'] // 60}-minute "
+                          "phase budget in at least one workspace")
+    _end_phase(phases, "prepare", t, prepare_status)
     settings = db.get_settings()
     main_part = per_db.get(str(db.DB_PATH), {})
     try:
@@ -132,8 +181,10 @@ def _run() -> dict:
         "rescored": main_part.get("rescored", 0),
         "budget_skipped": {},
         "per_db": per_db,
+        "phases": phases,
     }
 
+    t = _begin_phase(phases, "fetch")
     for mod in SOURCES:
         name = mod.NAME
         st = {"label": getattr(mod, "LABEL", name), "status": "skipped",
@@ -208,19 +259,40 @@ def _run() -> dict:
             "at": summary["started"],
         }))
 
+    fetch_status = "ok"
+    if any(str(s.get("status", "")).startswith("partial")
+           for s in summary["sources"].values()):
+        fetch_status = "partial: at least one source hit its budget"
+    _end_phase(phases, "fetch", t, fetch_status)
+
+    t = _begin_phase(phases, "match")
+    match_deadline = time.monotonic() + PHASE_BUDGET_SECONDS["match"]
+    match_status = "ok"
     summary["matches_removed"] = 0
     for path in db.all_paths():   # each company is matched in its own file
         with db.use(path):
             try:
                 autolearn.sync_vocabulary()
-                summary["matches_removed"] += matcher.prune_misfits()
-                n = matcher.run_all()
+                summary["matches_removed"] += matcher.prune_misfits(
+                    deadline=match_deadline)
+                n = matcher.run_all(deadline=match_deadline)
                 per_db[str(path)]["matches_new"] = n
                 summary["matches_new"] += n
+            except matcher.PhaseTimeout:
+                match_status = ("partial: stopped at the "
+                                f"{PHASE_BUDGET_SECONDS['match'] // 60}-minute "
+                                "phase budget")
+                summary["errors"].append(
+                    f"matcher: stopped at the "
+                    f"{PHASE_BUDGET_SECONDS['match'] // 60}-minute match "
+                    f"phase budget in {path.name}")
+                break   # the budget is spent; later workspaces wait a run
             except Exception as e:  # noqa: BLE001
                 summary["errors"].append(f"matcher: {e}")
     with db.use(None):
         autolearn.sync_vocabulary()
+    _end_phase(phases, "match", t, match_status)
+    PROGRESS["run_started"] = None
 
     summary["finished"] = datetime.now(timezone.utc).isoformat()
     db.set_setting("last_collect_at", summary["finished"])

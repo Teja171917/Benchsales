@@ -128,10 +128,13 @@ def sync_vocabulary() -> bool:
     return changed
 
 
-def maintain() -> dict:
+def maintain(deadline: float | None = None) -> dict:
     """The whole "keep everything up to date" step. Safe to call any time.
     Learns new skills, refreshes stored resume skills, and rescores existing
-    matches when something changed. Never deletes a match."""
+    matches when something changed. Never deletes a match. With a monotonic
+    deadline (collection prepare phase), raises matcher.PhaseTimeout when
+    the budget is spent; work already done stays done."""
+    matcher.check_deadline(deadline)
     out = {"learned": [], "resumes_refreshed": 0, "rescored": 0}
     # a skill learned earlier that has since become an alias ("jenkin" ->
     # "jenkins") is a spelling of a known skill, not a skill of its own
@@ -143,6 +146,7 @@ def maintain() -> dict:
     if db.get_setting("auto_learn_skills", "1") == "1":
         new: list[str] = []
         for c in consultants:
+            matcher.check_deadline(deadline)
             new += db.add_learned_skills(
                 candidate_skills(c.get("raw_text") or ""),
                 source=c.get("filename") or "")
@@ -150,12 +154,13 @@ def maintain() -> dict:
             out["learned"] = sorted(set(new))
             sync_vocabulary()
     for c in consultants:
+        matcher.check_deadline(deadline)
         fresh = extract_skills(c.get("raw_text") or "")
         if fresh != sorted(c.get("skills") or []):
             db.update_resume_skills(c["id"], fresh)
             out["resumes_refreshed"] += 1
     if out["learned"] or out["resumes_refreshed"]:
-        out["rescored"] = matcher.rescore_existing()
+        out["rescored"] = matcher.rescore_existing(deadline=deadline)
     return out
 
 

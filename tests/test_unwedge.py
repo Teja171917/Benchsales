@@ -35,8 +35,8 @@ class CollectorBudgetTests(unittest.TestCase):
         orig_prepare = collector._prepare_all
         collector.SOURCES = [fake]
         collector.SOURCE_BUDGET_SECONDS = 0
-        collector._prepare_all = lambda: ([{"title": "Java", "location": ""}],
-                                          {str(db.DB_PATH): {}})
+        collector._prepare_all = lambda deadline=None: (
+            [{"title": "Java", "location": ""}], {str(db.DB_PATH): {}})
         try:
             summary = collector.run()
         finally:
