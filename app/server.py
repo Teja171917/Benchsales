@@ -186,6 +186,10 @@ def _startup():
                 pass
     threading.Thread(target=_warm_demand, daemon=True,
                      name="benchpilot-demand-warm").start()
+    # warm the match lists too, so the first Matches open after this
+    # restart paints immediately instead of paying the cold build
+    threading.Thread(target=_warm_matches_cache, daemon=True,
+                     name="benchpilot-matches-warm").start()
     # classify the work-auth wording of jobs collected before the
     # visa tags existed — batched, per workspace, until none are left
     def _backfill_auth():
@@ -858,6 +862,13 @@ def _safe_collect():
         _do_collect()
     except Exception:
         pass
+    # the run just rewrote matches in every workspace: rebuild the
+    # cached lists here, on this background thread, so the next
+    # Matches open is a memory hit instead of a cold build
+    try:
+        _warm_matches_cache()
+    except Exception:
+        pass
     finally:
         # _kick_collect claims the running flag before spawning; the
         # claim is released HERE no matter how the run ended, so a
@@ -1522,6 +1533,40 @@ def api_save_live(request: Request, data: dict):
 _matches_cache: dict = {}
 
 
+def _matches_rows(consultant_id: int = 0, min_score: float = 0,
+                  force: bool = False):
+    """The current workspace's full match list, cached 5 minutes (see
+    api_list_matches). force=True rebuilds even a fresh entry — the
+    cache warmers use it so a collection's results are already built
+    when the next person opens Matches."""
+    key = (str(db.current_path()), consultant_id, min_score)
+    now = time.time()
+    hit = _matches_cache.get(key)
+    if hit and hit[0] > now and not force:
+        return hit[1]
+    rows = db.list_matches(consultant_id or None, min_score)
+    confirmed = db.confirmed_cities()
+    for m in rows:
+        m["city"] = db.city_of_location(m.get("location") or "", confirmed)
+    _matches_cache[key] = (now + 300, rows)
+    return rows
+
+
+def _warm_matches_cache():
+    """Build every workspace's default match list in the background
+    (Teja, Nov 7 2026): the first Matches open after a restart — or
+    right after a collection — otherwise pays the full cold build
+    (~90s+ under contention) before even the newest 50 can paint.
+    Runs on background threads only; a user who beats the warm-up
+    simply pays the normal cached build."""
+    for path in db.all_paths():
+        try:
+            with db.use(path):
+                _matches_rows(0, 0, force=True)
+        except Exception:
+            pass
+
+
 @app.get("/api/matches")
 def api_list_matches(consultant_id: int = 0, min_score: float = 0,
                      limit: int = 0):
@@ -1540,17 +1585,7 @@ def api_list_matches(consultant_id: int = 0, min_score: float = 0,
     `limit` rows so it can paint immediately, then fetches the full
     list behind it. Same row shape, sliced from the same cached build
     — newest postings first, score as the tiebreak."""
-    key = (str(db.current_path()), consultant_id, min_score)
-    now = time.time()
-    hit = _matches_cache.get(key)
-    if hit and hit[0] > now:
-        rows = hit[1]
-    else:
-        rows = db.list_matches(consultant_id or None, min_score)
-        confirmed = db.confirmed_cities()
-        for m in rows:
-            m["city"] = db.city_of_location(m.get("location") or "", confirmed)
-        _matches_cache[key] = (now + 300, rows)
+    rows = _matches_rows(consultant_id, min_score)
     if limit and limit > 0:
         def _posted_ts(m):
             raw = (m.get("posted_at") or "").strip()

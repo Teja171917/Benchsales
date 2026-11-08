@@ -98,3 +98,55 @@ class MatchesLimitTests(unittest.TestCase):
         rows = server.api_list_matches(0, 0, 50)
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[0]["job_title"], "New Role")
+
+
+class MatchesWarmTests(unittest.TestCase):
+    """Cache warming (Nov 7 2026): _warm_matches_cache builds each
+    workspace's list on a background thread at startup and after each
+    collection, so the first Matches open is a memory hit. The warm
+    must REPLACE a fresh-but-stale entry, not just fill an empty one."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "bench.db"
+        db.init_db()
+        server._matches_cache.clear()
+        db._cities_cache.clear()
+        self.c = db.create_consultant({"name": "Warm Tester"})
+        jid = db.insert_job({"source": "dice", "source_id": "w1",
+                             "title": "Java Developer", "company": "Acme",
+                             "location": "Houston, TX",
+                             "description": "Java.", "url": ""})
+        db.insert_match(self.c["id"], jid, 90, {}, [])
+
+    def tearDown(self):
+        db.DB_PATH = self._old
+        self.tmp.cleanup()
+
+    def test_warm_populates_cache_and_refresh_replaces(self):
+        server._warm_matches_cache()
+        calls = {"n": 0}
+        orig = db.list_matches
+
+        def counting(*a, **k):
+            calls["n"] += 1
+            return orig(*a, **k)
+
+        db.list_matches = counting
+        try:
+            rows = server.api_list_matches(0, 0)
+            self.assertEqual(calls["n"], 0)   # served from the warm cache
+            self.assertEqual(len(rows), 1)
+            # a collection lands a new match; warming again must
+            # replace the entry even though its TTL has not expired
+            jid2 = db.insert_job({"source": "dice", "source_id": "w2",
+                                  "title": "Data Engineer", "company": "Beta",
+                                  "location": "Austin, TX",
+                                  "description": "x", "url": ""})
+            db.insert_match(self.c["id"], jid2, 85, {}, [])
+        finally:
+            db.list_matches = orig
+        server._warm_matches_cache()
+        rows = server.api_list_matches(0, 0)
+        self.assertEqual(len(rows), 2)
