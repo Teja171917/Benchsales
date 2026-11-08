@@ -98,9 +98,23 @@ async def auth_gate(request: Request, call_next):
                 try:
                     decoded = base64.b64decode(auth[6:]).decode("utf-8", "ignore")
                     user, _, given = decoded.partition(":")
-                    target = db.login_target(user, given)
                 except Exception:
+                    user, given = "", ""
                     target = False
+                else:
+                    # rate-limit this door like the login endpoints
+                    # (security batch 1, Nov 7 2026): the shared
+                    # workspace passwords must not be brute-forceable
+                    # by sending Basic headers straight at the API
+                    key = "basic:" + user.strip().lower()
+                    if _login_rate_limited(key):
+                        return JSONResponse(
+                            {"detail": "too many failed attempts — "
+                                       "try again in a few minutes"},
+                            status_code=429)
+                    target = db.login_target(user, given)
+                    if target is False:
+                        _login_fails.setdefault(key, []).append(time.time())
             if target is not False:
                 request.state.basic_target = target
         if target is False:
@@ -141,6 +155,23 @@ def _startup():
         with db.use(path):
             db.init_db()
     accounts.init_accounts()   # individual user logins live in their own file
+    # fail-open guard (security batch 1, Nov 7 2026): if none of the
+    # three gate signals exist, the app serves everything — including
+    # Settings — without any login. That is right for a first local
+    # boot and dangerous anywhere else, so shout about it in the log
+    # and in the activity feed instead of failing silently.
+    if not (os.environ.get("BENCHPILOT_PASSWORD") or db.companies()
+            or accounts.any_users()):
+        _warn = ("SECURITY WARNING: BenchPilot booted UNGATED — no main "
+                 "password, no companies configured and no account users. "
+                 "Every route is reachable without a login.")
+        print("=" * 72)
+        print(_warn)
+        print("=" * 72)
+        try:
+            db.log_activity("security", _warn, actor="system")
+        except Exception:
+            pass
     persist.start_background()
     autolearn.sync_vocabulary()  # learned skills back into memory after a restart
     # warm each workspace's market-demand cache in the background, so
@@ -212,6 +243,19 @@ def _login_rate_limited(email: str) -> bool:
     return len(fails) >= 10
 
 
+async def _json_body(request: Request) -> dict:
+    """Parse a JSON object body. Malformed or non-object JSON is a
+    clean 400, never a 500 (security batch 1, Nov 7 2026: the auth
+    endpoints used to 500 on a malformed body)."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "request body must be valid JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "request body must be a JSON object")
+    return body
+
+
 def _public_user(user: dict) -> dict:
     return {"email": user["email"], "name": user["name"],
             "role": user["role"],
@@ -270,7 +314,7 @@ def auth_companies():
 async def auth_signup(request: Request):
     """Self-service signup with a company ID. The account is created
     pending; that workspace's admin approves it on the Team page."""
-    body = await request.json()
+    body = await _json_body(request)
     key = "signup:" + (body.get("email") or "").strip().lower()
     if _login_rate_limited(key):
         raise HTTPException(429, "too many attempts — wait a few minutes")
@@ -288,7 +332,7 @@ async def auth_signup(request: Request):
 
 @app.post("/api/auth/login")
 async def auth_login(request: Request):
-    body = await request.json()
+    body = await _json_body(request)
     email = (body.get("email") or "").strip().lower()
     if _login_rate_limited(email):
         raise HTTPException(429, "too many attempts — wait a few minutes")
@@ -316,7 +360,7 @@ async def auth_basic_login(request: Request):
     username/password and issues its signed cookie so the Team page
     bootstrap (creating the first individual accounts) stays reachable
     in a browser, where the old Basic popup no longer appears."""
-    body = await request.json()
+    body = await _json_body(request)
     username = (body.get("username") or "").strip()
     if _login_rate_limited("basic:" + username.lower()):
         raise HTTPException(429, "too many attempts — wait a few minutes")
@@ -487,7 +531,7 @@ def admin_list_users(request: Request):
 @app.post("/api/admin/users")
 async def admin_create_user(request: Request):
     scope = _require_admin(request)
-    body = await request.json()
+    body = await _json_body(request)
     slug = (body.get("workspace") or "main").strip()
     if slug not in scope:
         raise HTTPException(403, "you can only manage your own workspace")
@@ -513,7 +557,7 @@ async def admin_set_password(request: Request, user_id: int):
     target = accounts.get_user(user_id)
     if not target or (target.get("company_slug") or "main") not in scope:
         raise HTTPException(404, "user not found")
-    body = await request.json()
+    body = await _json_body(request)
     try:
         accounts.set_password(user_id, body.get("password") or "")
     except ValueError as e:
@@ -527,7 +571,7 @@ async def admin_set_active(request: Request, user_id: int):
     target = accounts.get_user(user_id)
     if not target or (target.get("company_slug") or "main") not in scope:
         raise HTTPException(404, "user not found")
-    body = await request.json()
+    body = await _json_body(request)
     me = getattr(request.state, "user", None)
     if me and me["id"] == user_id and not body.get("active"):
         raise HTTPException(400, "you can't deactivate your own account")
@@ -550,7 +594,7 @@ async def admin_approve_user(request: Request, user_id: int):
     target = accounts.get_user(user_id)
     if not target or (target.get("company_slug") or "main") not in scope:
         raise HTTPException(404, "user not found")
-    body = await request.json()
+    body = await _json_body(request)
     try:
         user = accounts.approve_user(user_id, body.get("role") or "member")
     except ValueError as e:
@@ -751,7 +795,8 @@ def _maybe_run_office():
 
 
 @app.post("/api/office/run")
-def api_office_run():
+def api_office_run(request: Request):
+    _require_admin(request)
     started = _start_office_run(db.current_path())
     return {"started": started, "running": True}
 
@@ -775,17 +820,19 @@ def api_office_drafts(limit: int = 50):
 
 
 @app.post("/api/office/autopilot")
-def api_office_autopilot(payload: dict):
+def api_office_autopilot(request: Request, payload: dict):
     """Toggle autopilot: agents fix safe issues themselves (on) or only
     report them (off)."""
+    _require_admin(request)
     enabled = bool(payload.get("enabled", True))
     db.set_setting("office_autopilot", "1" if enabled else "0")
     return {"autopilot": enabled}
 
 
 @app.post("/api/matches/{mid}/unquarantine")
-def api_unquarantine(mid: int):
+def api_unquarantine(request: Request, mid: int):
     """Restore a match quarantined by the Compliance agent."""
+    _require_admin(request)
     db.set_compliance_flag(mid, 0)
     return {"ok": True}
 
@@ -874,7 +921,8 @@ def api_learned_skills():
 
 
 @app.delete("/api/learned-skills/{skill}")
-def api_delete_learned_skill(skill: str):
+def api_delete_learned_skill(request: Request, skill: str):
+    _require_admin(request)
     if not db.delete_learned_skill(skill.lower()):
         raise HTTPException(404, "skill not found")
     autolearn.block_skill(skill)  # do not learn it again from the same resumes
@@ -1138,18 +1186,21 @@ def _maybe_import_folder():
 
 
 @app.get("/api/backup/status")
-def api_backup_status():
+def api_backup_status(request: Request):
+    _require_admin(request)
     return persist.status()
 
 
 @app.post("/api/backup/now")
-def api_backup_now():
+def api_backup_now(request: Request):
+    _require_admin(request)
     persist.backup(force=True, path=db.current_path())
     return persist.status()
 
 
 @app.get("/api/resume-import/status")
-def api_import_status():
+def api_import_status(request: Request):
+    _require_admin(request)
     _import_status = _imp()
     s = db.get_settings()
     with db.get_conn() as conn:
@@ -1163,7 +1214,8 @@ def api_import_status():
 
 
 @app.post("/api/resume-import/run")
-def api_import_run():
+def api_import_run(request: Request):
+    _require_admin(request)
     if _imp()["running"]:
         return {"started": False}
     path = db.current_path()
@@ -1499,7 +1551,7 @@ def api_list_matches(consultant_id: int = 0, min_score: float = 0):
 async def api_create_feedback(request: Request):
     """A team member leaves a feedback point: what they want in the app.
     The author is the signed-in user when there is one."""
-    body = await request.json()
+    body = await _json_body(request)
     text = str(body.get("text") or "").strip()[:2000]
     if not text:
         raise HTTPException(400, "feedback text is empty")
@@ -1524,7 +1576,7 @@ def api_list_feedback(request: Request):
 @app.post("/api/feedback/{fid}/status")
 async def api_feedback_status(fid: int, request: Request):
     _require_admin(request)
-    body = await request.json()
+    body = await _json_body(request)
     status = str(body.get("status") or "")
     if status not in ("new", "planned", "done", "dismissed"):
         raise HTTPException(400, "unknown status")
@@ -1537,7 +1589,7 @@ async def api_feedback_status(fid: int, request: Request):
 async def api_assistant_chat(request: Request):
     """In-app assistant: answers from the caller's own workspace data.
     Read-only — it never changes data or submits anything."""
-    body = await request.json()
+    body = await _json_body(request)
     user = accounts.resolve_session(request.cookies.get(SESSION_COOKIE, ""))
     actor = user["email"] if user else "shared"
     return assistant_mod.chat(str(body.get("message") or ""),
