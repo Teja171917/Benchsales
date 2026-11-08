@@ -30,7 +30,9 @@ _DETAIL = {"jobAd": {"sections": {
 class StaffingFirmsTests(unittest.TestCase):
     def test_watchlist_loaded(self):
         firms = sr.firms()
-        self.assertEqual(len(firms), 202)
+        # 202 from Teja's CSV + 22 verified additions Nov 7 2026
+        # (6 SmartRecruiters feeds + 16 directory, incl. Innova)
+        self.assertEqual(len(firms), 224)
         live = sr.sr_firms()
         self.assertGreaterEqual(len(live), 15)
         for f in live:

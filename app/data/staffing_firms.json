@@ -1614,5 +1614,181 @@
   "identifier": "",
   "verified": false,
   "notes": "Now 512Financial executive search; no public job board"
+ },
+ {
+  "company": "Saxon Global",
+  "careers_url": "https://careers.smartrecruiters.com/SaxonGlobal",
+  "ats": "SmartRecruiters",
+  "identifier": "SaxonGlobal",
+  "verified": true,
+  "notes": "SmartRecruiters API live: 193 postings, checked 2026-11-07"
+ },
+ {
+  "company": "Endava",
+  "careers_url": "https://careers.smartrecruiters.com/Endava",
+  "ats": "SmartRecruiters",
+  "identifier": "Endava",
+  "verified": true,
+  "notes": "SmartRecruiters API live: 168 postings, checked 2026-11-07"
+ },
+ {
+  "company": "Alorica",
+  "careers_url": "https://careers.smartrecruiters.com/Alorica",
+  "ats": "SmartRecruiters",
+  "identifier": "Alorica",
+  "verified": true,
+  "notes": "SmartRecruiters API live: 14 postings, checked 2026-11-07"
+ },
+ {
+  "company": "Iris Software",
+  "careers_url": "https://careers.smartrecruiters.com/IrisSoftware",
+  "ats": "SmartRecruiters",
+  "identifier": "IrisSoftware",
+  "verified": true,
+  "notes": "SmartRecruiters API live: 7 postings, checked 2026-11-07"
+ },
+ {
+  "company": "TTEC",
+  "careers_url": "https://careers.smartrecruiters.com/TTEC",
+  "ats": "SmartRecruiters",
+  "identifier": "TTEC",
+  "verified": true,
+  "notes": "SmartRecruiters API live: 1 postings, checked 2026-11-07"
+ },
+ {
+  "company": "LaSalle Network",
+  "careers_url": "https://careers.smartrecruiters.com/LaSalleNetwork",
+  "ats": "SmartRecruiters",
+  "identifier": "LaSalleNetwork",
+  "verified": true,
+  "notes": "SmartRecruiters API live: 1 postings, checked 2026-11-07"
+ },
+ {
+  "company": "UST",
+  "careers_url": "https://www.ust.com/en/careers",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, ATS unknown"
+ },
+ {
+  "company": "ICONMA",
+  "careers_url": "https://www.iconma.com/careers",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, ATS unknown"
+ },
+ {
+  "company": "LanceSoft",
+  "careers_url": "https://lancesoft.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "job search page loads (Find Work), ATS unknown"
+ },
+ {
+  "company": "Genesis10",
+  "careers_url": "https://www.genesis10.com/careers",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, ATS unknown"
+ },
+ {
+  "company": "First Tek",
+  "careers_url": "https://www.first-tek.com/about/careers/",
+  "ats": "jobdiva",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, JobDiva fingerprint in page source"
+ },
+ {
+  "company": "InfoVision",
+  "careers_url": "https://www.infovision.com/careers/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, ATS unknown"
+ },
+ {
+  "company": "Movate",
+  "careers_url": "https://www.movate.com/careers-at-movate/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, ATS unknown"
+ },
+ {
+  "company": "HTC Global Services",
+  "careers_url": "https://www.htcinc.com/careers/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, ATS unknown"
+ },
+ {
+  "company": "Luxoft",
+  "careers_url": "https://career.luxoft.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers site loads, ATS unknown"
+ },
+ {
+  "company": "Hirewell",
+  "careers_url": "https://www.hirewell.com/careers",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, ATS unknown"
+ },
+ {
+  "company": "AgileOne",
+  "careers_url": "https://www.agile-one.com/careers",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, ATS unknown"
+ },
+ {
+  "company": "Tenth Revolution Group",
+  "careers_url": "https://careers.tenthrevolution.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers site loads, ATS unknown; SIA 2026 newcomer, parent of the Frank recruitment brands"
+ },
+ {
+  "company": "Talent Groups",
+  "careers_url": "https://www.talentgroups.com/jobs",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "jobs page loads, ATS unknown"
+ },
+ {
+  "company": "USM Business Systems",
+  "careers_url": "https://www.usmsystems.com/job-openings/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "job openings page loads, ATS unknown"
+ },
+ {
+  "company": "The Planet Group",
+  "careers_url": "https://careers.theplanetgroup.com/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers site loads, ATS unknown; parent of Planet Interactive (already listed)"
+ },
+ {
+  "company": "Innova Solutions",
+  "careers_url": "https://innovasolutions.com/careers/",
+  "ats": "unknown",
+  "identifier": "",
+  "verified": true,
+  "notes": "careers page loads, ATS unknown"
  }
 ]
