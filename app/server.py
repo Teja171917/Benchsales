@@ -1523,7 +1523,8 @@ _matches_cache: dict = {}
 
 
 @app.get("/api/matches")
-def api_list_matches(consultant_id: int = 0, min_score: float = 0):
+def api_list_matches(consultant_id: int = 0, min_score: float = 0,
+                     limit: int = 0):
     """The full match list is the app's heaviest response (~1 MB at real
     bench scale) and rebuilding it costs real CPU on a small instance
     that is also running collections and the Agent Office — under that
@@ -1533,17 +1534,37 @@ def api_list_matches(consultant_id: int = 0, min_score: float = 0):
     users and turns repeat opens into a memory hit. (Was 60s until
     Nov 5 2026: at a 60s TTL the first filter click of every minute
     still paid the cold rebuild, which is exactly the click users
-    make most.)"""
+    make most.)
+
+    limit (Nov 7 2026): the Matches page first asks for the newest
+    `limit` rows so it can paint immediately, then fetches the full
+    list behind it. Same row shape, sliced from the same cached build
+    — newest postings first, score as the tiebreak."""
     key = (str(db.current_path()), consultant_id, min_score)
     now = time.time()
     hit = _matches_cache.get(key)
     if hit and hit[0] > now:
-        return hit[1]
-    rows = db.list_matches(consultant_id or None, min_score)
-    confirmed = db.confirmed_cities()
-    for m in rows:
-        m["city"] = db.city_of_location(m.get("location") or "", confirmed)
-    _matches_cache[key] = (now + 300, rows)
+        rows = hit[1]
+    else:
+        rows = db.list_matches(consultant_id or None, min_score)
+        confirmed = db.confirmed_cities()
+        for m in rows:
+            m["city"] = db.city_of_location(m.get("location") or "", confirmed)
+        _matches_cache[key] = (now + 300, rows)
+    if limit and limit > 0:
+        def _posted_ts(m):
+            raw = (m.get("posted_at") or "").strip()
+            if not raw:
+                return 0.0
+            try:
+                return datetime.fromisoformat(
+                    raw.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return 0.0
+        newest = sorted(rows,
+                        key=lambda m: (_posted_ts(m), m.get("score") or 0),
+                        reverse=True)
+        return newest[:limit]
     return rows
 
 

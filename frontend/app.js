@@ -810,14 +810,17 @@ async function runCollection() {
 }
 
 /* ================= MATCHES ================= */
-let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "best",
-  emp: EMP_DEFAULT.slice(), unspec: true, city: "", work: [], auths: [], levels: []};
+let matchFilter = {consultant_id: "", min_score: 0, source: "", sort: "new",
+  // Teja (Nov 7 2026): Matches opens on the contract family — C2C,
+  // Contract, Contract-to-hire pre-ticked (the Jobs page keeps its
+  // own default) — and sorted latest post first.
+  emp: ["c2c", "contract", "c2h"], unspec: true, city: "", work: [], auths: [], levels: []};
 // the matches list is fetched ONCE (all consultants, threshold 0) and
 // kept here: EVERY filter — consultant and threshold included — then
 // filters this copy locally instead of re-downloading the whole list
 // (and paying a cold server rebuild) on every filter change
-let matchesCache = {rows: null, at: 0};
-let matchShowCount = 100;
+let matchesCache = {rows: null, at: 0, partial: false};
+let matchShowCount = 50;
 function cityOf(m) {
   if (m.city !== undefined && m.city !== null) return m.city;
   let loc = (m.location || "").trim();
@@ -924,15 +927,30 @@ async function renderMatches() {
   }).catch(() => {});
 }
 async function loadMatches(force) {
-  matchShowCount = 100;
+  matchShowCount = 50;
   // Refetch only when forced, when nothing is loaded yet, or when the
   // copy is older than 5 minutes (mirroring the server cache). Filter
   // changes — consultant and threshold included — NEVER refetch: the
   // full list is already here and renderMatchCards filters it locally.
-  if (force || !matchesCache.rows || Date.now() - matchesCache.at > 5 * 60 * 1000) {
+  // Two-stage paint (Nov 7 2026, Teja: "at least load the top 50"):
+  // with nothing on screen yet, first pull just the newest 50 rows and
+  // paint those, then fetch the full list behind them and re-render.
+  const needFull = force || !matchesCache.rows || matchesCache.partial
+    || Date.now() - matchesCache.at > 5 * 60 * 1000;
+  if (needFull) {
     const el = $("#mt-list");
-    el.innerHTML = skelCards(6);
-    matchesCache = {rows: await api("/api/matches?min_score=0"), at: Date.now()};
+    if (!matchesCache.rows) {
+      try {
+        const first = await api("/api/matches?min_score=0&limit=50");
+        if (Array.isArray(first) && first.length) {
+          matchesCache = {rows: first, at: 0, partial: true};
+          renderMatchCards();
+        }
+      } catch (e) { /* the full fetch below surfaces real errors */ }
+    }
+    if (!matchesCache.partial) el.innerHTML = skelCards(6);
+    matchesCache = {rows: await api("/api/matches?min_score=0"),
+                    at: Date.now(), partial: false};
   }
   renderMatchCards();
 }
@@ -970,8 +988,9 @@ function renderMatchCards() {
   else if (matchFilter.sort === "new") ms.sort((a, b) => (postedTs(b) - postedTs(a)) || (b.score - a.score));
   else ms.sort((a, b) => (b.score - a.score) || (postedTs(b) - postedTs(a)));
   const cnt = $("#mt-count");
-  if (cnt) cnt.textContent = ms.length === total ? `${ms.length} matches`
-    : `Showing ${ms.length} of ${total} matches`;
+  if (cnt) cnt.textContent = (ms.length === total ? `${ms.length} matches`
+    : `Showing ${ms.length} of ${total} matches`)
+    + (matchesCache.partial ? " · showing the newest 50 — loading the rest…" : "");
   const totalFiltered = ms.length;
   el.innerHTML = ms.slice(0, matchShowCount).map((m) => `
     <div class="card">
@@ -1009,7 +1028,7 @@ function renderMatchCards() {
     more.className = "card";
     more.innerHTML = `<button class="btn" id="mt-more" style="width:100%">Show more — ${totalFiltered - matchShowCount} more matches</button>`;
     el.appendChild(more);
-    $("#mt-more").onclick = () => { matchShowCount += 100; renderMatchCards(); };
+    $("#mt-more").onclick = () => { matchShowCount += 50; renderMatchCards(); };
   }
   $$("[data-tailor]", el).forEach((b) => b.onclick = () => tailorModal(Number(b.dataset.tailor)));
   $$("[data-applyplan]", el).forEach((b) => b.onclick = () => applyPlanModal(Number(b.dataset.applyplan)));
