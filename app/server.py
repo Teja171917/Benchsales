@@ -184,12 +184,13 @@ def _startup():
                     market.demand_map()
             except Exception:
                 pass
-    threading.Thread(target=_warm_demand, daemon=True,
-                     name="benchpilot-demand-warm").start()
-    # warm the match lists too, so the first Matches open after this
-    # restart paints immediately instead of paying the cold build
+    # warm the match lists FIRST (Nov 7 2026): the first Matches open
+    # after a restart is the click users feel most, so its build gets
+    # the head start over the demand cache and the backfills below
     threading.Thread(target=_warm_matches_cache, daemon=True,
                      name="benchpilot-matches-warm").start()
+    threading.Thread(target=_warm_demand, daemon=True,
+                     name="benchpilot-demand-warm").start()
     # classify the work-auth wording of jobs collected before the
     # visa tags existed — batched, per workspace, until none are left
     def _backfill_auth():
@@ -1533,23 +1534,44 @@ def api_save_live(request: Request, data: dict):
 _matches_cache: dict = {}
 
 
+_matches_locks: dict = {}
+_matches_locks_guard = threading.Lock()
+
+
+def _matches_lock(key) -> threading.Lock:
+    with _matches_locks_guard:
+        return _matches_locks.setdefault(key, threading.Lock())
+
+
 def _matches_rows(consultant_id: int = 0, min_score: float = 0,
                   force: bool = False):
     """The current workspace's full match list, cached 5 minutes (see
     api_list_matches). force=True rebuilds even a fresh entry — the
     cache warmers use it so a collection's results are already built
-    when the next person opens Matches."""
+    when the next person opens Matches.
+
+    Builds are serialized per cache key (Nov 7 2026): the first cold
+    test after cache warming still took ~45s because a click landing
+    mid-warm started a SECOND full build next to the warm thread's,
+    and the two crawled together on the small instance. Now the
+    second caller waits on the lock and then re-checks the cache —
+    one build, shared by everyone."""
     key = (str(db.current_path()), consultant_id, min_score)
     now = time.time()
     hit = _matches_cache.get(key)
     if hit and hit[0] > now and not force:
         return hit[1]
-    rows = db.list_matches(consultant_id or None, min_score)
-    confirmed = db.confirmed_cities()
-    for m in rows:
-        m["city"] = db.city_of_location(m.get("location") or "", confirmed)
-    _matches_cache[key] = (now + 300, rows)
-    return rows
+    with _matches_lock(key):
+        now = time.time()
+        hit = _matches_cache.get(key)
+        if hit and hit[0] > now and not force:
+            return hit[1]
+        rows = db.list_matches(consultant_id or None, min_score)
+        confirmed = db.confirmed_cities()
+        for m in rows:
+            m["city"] = db.city_of_location(m.get("location") or "", confirmed)
+        _matches_cache[key] = (now + 300, rows)
+        return rows
 
 
 def _warm_matches_cache():

@@ -150,3 +150,56 @@ class MatchesWarmTests(unittest.TestCase):
         server._warm_matches_cache()
         rows = server.api_list_matches(0, 0)
         self.assertEqual(len(rows), 2)
+
+
+class MatchesBuildLockTests(unittest.TestCase):
+    """Per-key build lock (Nov 7 2026): two callers racing a cold
+    cache must share ONE build — before the lock, a click landing
+    mid-warm started a duplicate build and both crawled."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = db.DB_PATH
+        db.DB_PATH = Path(self.tmp.name) / "bench.db"
+        db.init_db()
+        server._matches_cache.clear()
+        db._cities_cache.clear()
+        c = db.create_consultant({"name": "Lock Tester"})
+        jid = db.insert_job({"source": "dice", "source_id": "l1",
+                             "title": "Java Developer", "company": "Acme",
+                             "location": "Houston, TX",
+                             "description": "Java.", "url": ""})
+        db.insert_match(c["id"], jid, 90, {}, [])
+
+    def tearDown(self):
+        db.DB_PATH = self._old
+        self.tmp.cleanup()
+
+    def test_concurrent_callers_share_one_build(self):
+        import threading
+        import time as _time
+        calls = {"n": 0}
+        orig = db.list_matches
+
+        def slow_counting(*a, **k):
+            calls["n"] += 1
+            _time.sleep(0.3)
+            return orig(*a, **k)
+
+        db.list_matches = slow_counting
+        results = {}
+        try:
+            def worker(name):
+                results[name] = server._matches_rows(0, 0)
+
+            threads = [threading.Thread(target=worker, args=(n,))
+                       for n in ("a", "b")]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        finally:
+            db.list_matches = orig
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(results["a"], results["b"])
+        self.assertEqual(len(results["a"]), 1)
