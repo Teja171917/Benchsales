@@ -23,7 +23,7 @@ import re
 import time
 from urllib.parse import quote_plus, urlparse
 
-from .common import clean, get_text_cached
+from .common import clean, get_text_cached, parallel_map
 from .smartrecruiters import firms as _all_firms
 
 NAME = "phenom"
@@ -155,12 +155,18 @@ def _firm_jobs(firm: dict, query_title: str) -> list[dict]:
 
 def fetch(query: dict, settings: dict) -> list[dict]:
     want = (query.get("title") or "").lower().split()
-    jobs: list[dict] = []
-    for firm in phenom_firms():
+
+    def pull(firm):
         try:
-            found = _firm_jobs(firm, query.get("title") or "")
+            return _firm_jobs(firm, query.get("title") or "")
         except Exception:  # noqa: BLE001 - fail soft per firm
-            continue
+            return []
+
+    # firms in parallel (Nov 8 2026): one-by-one page loads measured
+    # ~45s on the first call of a run; each firm only ever touches its
+    # own _STATE entry, so the loads are independent
+    jobs: list[dict] = []
+    for found in parallel_map(pull, phenom_firms()):
         for job in found:
             if want and not any(w in job["title"].lower() for w in want):
                 continue

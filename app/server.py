@@ -184,11 +184,12 @@ def _startup():
                     market.demand_map()
             except Exception:
                 pass
-    # warm the match lists FIRST (Nov 7 2026): the first Matches open
-    # after a restart is the click users feel most, so its build gets
-    # the head start over the demand cache and the backfills below
-    threading.Thread(target=_warm_matches_cache, daemon=True,
-                     name="benchpilot-matches-warm").start()
+    # warm the match lists and the Jobs table FIRST (Nov 7-8 2026):
+    # the first Matches/Jobs open after a restart is the click users
+    # feel most, so those builds get the head start over the demand
+    # cache and the backfills below
+    threading.Thread(target=_warm_caches, daemon=True,
+                     name="benchpilot-cache-warm").start()
     threading.Thread(target=_warm_demand, daemon=True,
                      name="benchpilot-demand-warm").start()
     # classify the work-auth wording of jobs collected before the
@@ -863,11 +864,11 @@ def _safe_collect():
         _do_collect()
     except Exception:
         pass
-    # the run just rewrote matches in every workspace: rebuild the
+    # the run just rewrote matches and the job pool: rebuild the
     # cached lists here, on this background thread, so the next
-    # Matches open is a memory hit instead of a cold build
+    # Matches/Jobs open is a memory hit instead of a cold build
     try:
-        _warm_matches_cache()
+        _warm_caches()
     except Exception:
         pass
     finally:
@@ -1252,6 +1253,55 @@ def api_job_cities():
     return db.job_cities()
 
 
+_jobs_cache: dict = {}
+_jobs_locks: dict = {}
+
+
+def _jobs_rows(source: str = "", q: str = "", limit: int = 50,
+               emp: tuple = (), include_unspecified: bool = False,
+               light: bool = False, force: bool = False):
+    """The job-pool list, cached 5 minutes per workspace + parameter
+    set, with the same build-lock discipline as the match list
+    (Nov 8 2026): the Jobs table scans thousands of rows, and while a
+    collection runs that scan took ~30s — long enough to read as
+    "not loading". Jobs only change when a collection runs, and the
+    warmers rebuild this after every collection, so a short cache is
+    invisible in practice."""
+    key = (str(db.current_path()), source, q, limit, emp,
+           include_unspecified, light)
+    now = time.time()
+    hit = _jobs_cache.get(key)
+    if hit and hit[0] > now and not force:
+        return hit[1]
+    with _matches_lock(("jobs",) + key):
+        now = time.time()
+        hit = _jobs_cache.get(key)
+        if hit and hit[0] > now and not force:
+            return hit[1]
+        rows = db.list_jobs(source=source, q=q, limit=limit,
+                            emp=list(emp),
+                            include_unspecified=include_unspecified,
+                            light=light)
+        _jobs_cache[key] = (now + 300, rows)
+        return rows
+
+
+def _warm_jobs_cache():
+    """Prebuild the Jobs table's exact request (newest 1000, light
+    rows) for the MAIN workspace — the pool is owner-facing and the
+    owner signs into main. Mirrors _warm_matches_cache."""
+    try:
+        with db.use(None):
+            _jobs_rows(limit=1000, light=True, force=True)
+    except Exception:
+        pass
+
+
+def _warm_caches():
+    _warm_matches_cache()
+    _warm_jobs_cache()
+
+
 @app.get("/api/jobs")
 def api_list_jobs(request: Request, source: str = "", q: str = "",
                   limit: int = 50,
@@ -1263,10 +1313,10 @@ def api_list_jobs(request: Request, source: str = "", q: str = "",
     descriptions (the Jobs table); fetch /api/jobs/{id} for the full
     posting."""
     _require_owner(request)
-    return db.list_jobs(source=source, q=q, limit=limit,
-                        emp=emptype.parse_wanted(emp),
-                        include_unspecified=include_unspecified,
-                        light=bool(light))
+    return _jobs_rows(source=source, q=q, limit=limit,
+                      emp=tuple(emptype.parse_wanted(emp)),
+                      include_unspecified=include_unspecified,
+                      light=bool(light))
 
 
 @app.get("/api/emp-types")

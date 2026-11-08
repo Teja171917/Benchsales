@@ -668,12 +668,22 @@ async function saveLive(jobs, btn) {
   loadJobs();
   return r;
 }
+let jobsTotal = 0;
 async function loadJobs() {
   const el = $("#j-list");
   if (!el) return;
   el.innerHTML = skelRows(8);
   try {
-    jobsCache = await api("/api/jobs?limit=1000&light=1");
+    // the true pool total rides along so the header can say how much
+    // of the pool this table actually holds (Nov 8 2026: the header
+    // called the 1000 fetched rows "the pool" while the nav badge
+    // showed the real 7,451 — same data, confusingly labeled)
+    const [rows, cnt] = await Promise.all([
+      api("/api/jobs?limit=1000&light=1"),
+      api("/api/jobs/count").catch(() => null),
+    ]);
+    jobsCache = rows;
+    if (cnt && typeof cnt.count === "number") jobsTotal = cnt.count;
   } catch (e) {
     el.innerHTML = `<div class="card muted">The job pool didn't load (${esc(e.message)}). <button class="btn" id="j-retry">Retry</button></div>`;
     const rt = $("#j-retry");
@@ -728,7 +738,7 @@ function applyJobFilters(resetShown) {
     : s === "oldest" ? ts(a) - ts(b) : ts(b) - ts(a));
   const cnt = $("#j-count");
   const page = list.slice(0, jobsShown);
-  if (cnt) cnt.textContent = `Showing ${page.length} of ${list.length} jobs (${jobsCache.length} in the pool)`;
+  if (cnt) cnt.textContent = `Showing ${page.length} of ${list.length} jobs (${jobsCache.length} loaded${jobsTotal && jobsTotal !== jobsCache.length ? ` of ${jobsTotal} in the pool` : " in the pool"})`;
   $("#j-list").innerHTML = `<div class="card" style="padding:0"><table class="jobs">
     <tr><th>Title</th><th>Company</th><th>Location</th><th>Source</th><th>Posted</th><th></th></tr>
     ${page.map((j) => `<tr data-jobid="${j.id}">

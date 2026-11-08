@@ -51,6 +51,21 @@ def wanted_emp(settings: dict) -> list[str]:
     return parse_wanted(settings.get("collect_emp_types") or "")
 
 
+def parallel_map(fn, items, workers: int = 6) -> list:
+    """Order-preserving thread pool for slow HTTP-bound adapter work
+    (Nov 8 2026): the staffing feeds fetched firms one by one —
+    SmartRecruiters' first call of a run measured ~175s and Phenom's
+    ~45s, most of the collection's fetch phase. Pure HTTP + in-memory
+    work only; nothing here touches the database, and each item's
+    function is expected to fail soft on its own errors."""
+    items = list(items)
+    if len(items) <= 1:
+        return [fn(x) for x in items]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(fn, items))
+
+
 # ---- small in-process cache for "download everything" endpoints ----
 _CACHE: dict = {}
 

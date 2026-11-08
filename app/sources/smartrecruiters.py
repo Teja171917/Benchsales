@@ -2,7 +2,7 @@
 
 Phase 1 covers the firms whose ATS is SmartRecruiters, via its public
 postings API (no key): GET /v1/companies/{identifier}/postings. The firm
-watchlist (202 companies from the user's CSV) lives in
+watchlist (224 companies: the user's CSV plus verified additions) lives in
 app/data/staffing_firms.json; firms on other ATSs are directory-only
 until their adapters land. These firms post mostly contract/C2C work,
 which is exactly what a bench-sales pool wants.
@@ -15,7 +15,7 @@ for the survivors so the matcher has a real description to score.
 import json
 from pathlib import Path
 
-from .common import clean, get_json_cached, strip_html
+from .common import clean, get_json_cached, parallel_map, strip_html
 
 NAME = "smartrecruiters"
 LABEL = "Staffing Firms (SmartRecruiters)"
@@ -102,12 +102,17 @@ def _normalize(firm: dict, p: dict) -> dict | None:
 
 def fetch(query: dict, settings: dict) -> list[dict]:
     want = (query.get("title") or "").lower().split()
-    jobs: list[dict] = []
-    for firm in sr_firms():
+
+    def pull(firm):
         try:
-            postings = _postings(firm["identifier"])
+            return firm, _postings(firm["identifier"])
         except Exception:  # noqa: BLE001 - one firm's outage must not kill the feed
-            continue
+            return firm, []
+
+    # firms in parallel (Nov 8 2026): one-by-one this loop measured
+    # ~175s on the first call of a run — most of the fetch phase
+    jobs: list[dict] = []
+    for firm, postings in parallel_map(pull, sr_firms()):
         for p in postings:
             job = _normalize(firm, p)
             if job is None:
@@ -115,9 +120,12 @@ def fetch(query: dict, settings: dict) -> list[dict]:
             if want and not any(w in job["title"].lower() for w in want):
                 continue
             jobs.append(job)
-    for job in jobs[:_DETAIL_CAP]:
+
+    def describe(job):
         ident, pid = job.pop("_sr")
         job["description"] = _description(ident, pid)
+
+    parallel_map(describe, jobs[:_DETAIL_CAP])
     for job in jobs[_DETAIL_CAP:]:
         job.pop("_sr", None)
     return jobs
