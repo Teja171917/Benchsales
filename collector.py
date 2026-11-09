@@ -161,6 +161,33 @@ def _save_job(job: dict) -> bool:
     return new
 
 
+def _job_keys(job: dict) -> list[tuple]:
+    """Identity keys for run-scoped dedupe, mirroring db.insert_job's
+    own dedupe: the source's id, plus the fuzzy title+company+location
+    key insert_job checks across sources. insert_job is insert-only —
+    a repeat sighting can never change the stored row — so a repeat is
+    pure cost: three text classifiers plus a fuzzy table scan, paid
+    once per database the job is copied into."""
+    keys = []
+    sid = (job.get("source_id") or "").strip()
+    if sid:
+        keys.append(("id", job.get("source", ""), sid))
+    keys.append(("fuzzy", (job.get("title") or "").strip().lower(),
+                 (job.get("company") or "").strip().lower(),
+                 (job.get("location") or "").strip().lower()))
+    return keys
+
+
+def _seen_before(seen: set, job: dict) -> bool:
+    """True when this run has already processed this job (under either
+    identity key); records the job's keys either way."""
+    keys = _job_keys(job)
+    if any(k in seen for k in keys):
+        return True
+    seen.update(keys)
+    return False
+
+
 def run() -> dict:
     """One collection for everyone: the searches are done once (one set of API
     calls), the jobs are copied into each company's database, and each
@@ -203,6 +230,12 @@ def _run() -> dict:
     }
 
     t = _begin_phase(phases, "fetch")
+    # run-scoped dedupe (Nov 9 2026): whole-feed sources hand back the
+    # same jobs for many queries, and every repeat sighting used to pay
+    # a full insert_job (classifiers + fuzzy scan) in every database —
+    # the three feed sources burned their whole 4-minute budgets on
+    # re-saving known jobs. Each job is now processed once per run.
+    seen_jobs: set = set()
     for mod in SOURCES:
         name = mod.NAME
         st = {"label": getattr(mod, "LABEL", name), "status": "skipped",
@@ -252,6 +285,9 @@ def _run() -> dict:
                         batch = usa.filter_us(batch)
                     for job in batch:
                         fetched += 1
+                        if _seen_before(seen_jobs, job):
+                            continue   # repeat sighting this run:
+                            # insert_job would only re-confirm the dup
                         if _save_job(job):
                             new += 1
                 if name == "monster" and not cut_short:   # only a run that WORKED starts the 12-hour wait

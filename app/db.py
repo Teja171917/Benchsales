@@ -639,17 +639,13 @@ def usage_add(source: str, hits: int) -> None:
 # ---- jobs ----
 def insert_job(job: dict) -> int | None:
     """Insert a job dict. Returns new id, or None if duplicate."""
-    tags = emptype.to_db(emptype.classify(
-        job.get("employment_type", ""), job.get("title", ""),
-        job.get("description", "")))
-    auth_tag = visa.classify_auth(
-        f"{job.get('title', '')}\n{job.get('description', '')}")
-    exp_level = levels.classify_level(
-        job.get("title", ""), job.get("description", ""))
     with get_conn() as conn:
-        # fuzzy dedupe: same title + company + location already present from
-        # any source. (Location is part of the key: staffing vendors post the
-        # same title in many cities and each is a separate opening.)
+        # fuzzy dedupe FIRST (Nov 9 2026): same title + company +
+        # location already present from any source. (Location is part
+        # of the key: staffing vendors post the same title in many
+        # cities and each is a separate opening.) The three text
+        # classifiers below only run for a job that will actually be
+        # inserted — duplicates used to pay their full cost too.
         dup = conn.execute(
             "SELECT id FROM jobs WHERE lower(title)=lower(?) AND "
             "lower(company)=lower(?) AND lower(location)=lower(?)",
@@ -658,6 +654,13 @@ def insert_job(job: dict) -> int | None:
         ).fetchone()
         if dup:
             return None
+        tags = emptype.to_db(emptype.classify(
+            job.get("employment_type", ""), job.get("title", ""),
+            job.get("description", "")))
+        auth_tag = visa.classify_auth(
+            f"{job.get('title', '')}\n{job.get('description', '')}")
+        exp_level = levels.classify_level(
+            job.get("title", ""), job.get("description", ""))
         try:
             cur = conn.execute(
                 """INSERT INTO jobs(source, source_id, title, company, location,
