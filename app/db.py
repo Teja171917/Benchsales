@@ -109,6 +109,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     fetched_at TEXT NOT NULL,
     UNIQUE(source, source_id)
 );
+CREATE INDEX IF NOT EXISTS idx_jobs_fuzzy_key
+    ON jobs(lower(title), lower(company), lower(location));
 CREATE TABLE IF NOT EXISTS "matches" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     consultant_id INTEGER NOT NULL,

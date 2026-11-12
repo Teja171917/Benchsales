@@ -240,6 +240,7 @@ def _run() -> dict:
         name = mod.NAME
         st = {"label": getattr(mod, "LABEL", name), "status": "skipped",
               "jobs": 0, "new": 0}
+        src_t0 = None
         if name == "monster" and mod.enabled(settings):
             enabled_sources.add("monster")    # an Apify token means "use Monster"
         if name == "dice" and mod.enabled(settings):
@@ -260,6 +261,7 @@ def _run() -> dict:
                 new = 0
                 cut_short = 0
                 t_start = datetime.now(timezone.utc)
+                src_t0 = time.monotonic()
                 usa_only = settings.get("usa_only", "1") == "1"
                 run_queries = queries
                 if name == "adzuna":
@@ -308,9 +310,19 @@ def _run() -> dict:
         summary["sources"][name] = st
         if st["status"].startswith("waiting"):
             continue   # keep the last REAL run visible in Settings (e.g. Monster's result)
+        # per-source wall-clock seconds (Nov 9 2026): the fetch phase
+        # total alone could not show WHICH source eats the time — the
+        # Nov 9 dedupe fix left fetch at 2583s with the split unknown.
+        # Stored on the Settings status so the next check reads it
+        # verbatim instead of guessing.
+        stored_status = st["status"]
+        secs = None
+        if src_t0 is not None:
+            secs = round(time.monotonic() - src_t0, 1)
+            stored_status += f" · took {secs:.0f}s"
         db.set_setting(f"last_run_{name}", json.dumps({
-            "status": st["status"], "jobs": st["jobs"], "new": st["new"],
-            "at": summary["started"],
+            "status": stored_status, "jobs": st["jobs"], "new": st["new"],
+            "at": summary["started"], "seconds": secs,
         }))
 
     fetch_status = "ok"

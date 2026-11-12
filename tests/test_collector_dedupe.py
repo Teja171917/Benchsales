@@ -81,6 +81,11 @@ class CollectorDedupeTests(unittest.TestCase):
         self.assertEqual(st["new"], 3)     # but only the 3 unique jobs
         self.assertEqual(calls["n"], 3)    # reached insert_job at all
         self.assertEqual(db.count_jobs(), 3)
+        # per-source seconds are recorded on the Settings status so a
+        # slow fetch phase can be attributed without guessing
+        last = json.loads(db.get_setting("last_run_fake"))
+        self.assertIsNotNone(last["seconds"])
+        self.assertIn("took", last["status"])
 
 
 class InsertJobOrderTests(unittest.TestCase):
