@@ -80,10 +80,29 @@ SKILLS = [
     "concurrency", "caching", "message queue", "event driven",
     "domain driven design", "clean architecture", "technical writing",
     "documentation", "mentoring", "stakeholder management",
+    # sap / erp (Nov 13 2026: a SAP IS-U/ABAP resume extracted only
+    # generic skills — "sap" was the sole SAP term in the lexicon, so
+    # the consultant's whole specialty was invisible to matching)
+    "abap", "sap abap", "sap is-u", "fica", "sap fica", "idoc",
+    "lsmw", "bdc", "bapi", "badi", "ricefw", "module pool",
+    "user exits", "smart meter", "ami", "device management", "mdms",
+    "meter-to-cash", "coupa", "hp alm", "fieldnet", "sap ecc",
+    "s/4hana", "sap hana", "hana", "fiori", "netweaver", "sap basis",
+    "successfactors", "ariba", "concur", "sap bw", "sap pi", "sap po",
+    "sap cpi", "sap mm", "sap sd", "sap fico", "fico", "sap hcm",
+    "sap billing", "sap crm", "sap srm", "sap gts", "sap ewm",
+    "sap tm", "sap pp", "sap qm", "sap pm",
 ]
 
 # alias -> canonical (must exist in SKILLS)
 ALIASES = {
+    "is-u": "sap is-u",
+    "isu": "sap is-u",
+    "sap isu": "sap is-u",
+    "idocs": "idoc",
+    "fi-ca": "fica",
+    "sap fi-ca": "fica",
+    "ecc": "sap ecc",
     "k8s": "kubernetes",
     "node": "node.js",
     "nodejs": "node.js",
@@ -239,6 +258,18 @@ _DISPLAY_OVERRIDES = {
     "vs code": "VS Code", "intellij": "IntelliJ", "pycharm": "PyCharm",
     "visual studio": "Visual Studio", "android studio": "Android Studio",
     "xcode": "Xcode", "macos": "macOS",
+    "abap": "ABAP", "sap abap": "SAP ABAP", "sap is-u": "SAP IS-U",
+    "fica": "FICA", "sap fica": "SAP FICA", "idoc": "IDoc",
+    "lsmw": "LSMW", "bdc": "BDC", "bapi": "BAPI", "badi": "BADI",
+    "ricefw": "RICEFW", "ami": "AMI", "mdms": "MDMS",
+    "hp alm": "HP ALM", "coupa": "Coupa", "sap ecc": "SAP ECC",
+    "s/4hana": "S/4HANA", "hana": "HANA", "sap hana": "SAP HANA",
+    "fiori": "Fiori", "sap bw": "SAP BW", "sap pi": "SAP PI",
+    "sap po": "SAP PO", "sap cpi": "SAP CPI", "sap mm": "SAP MM",
+    "sap sd": "SAP SD", "sap fico": "SAP FICO", "fico": "FICO",
+    "sap hcm": "SAP HCM", "sap crm": "SAP CRM", "sap srm": "SAP SRM",
+    "sap gts": "SAP GTS", "sap ewm": "SAP EWM", "sap tm": "SAP TM",
+    "sap pp": "SAP PP", "sap qm": "SAP QM", "sap pm": "SAP PM",
 }
 
 
