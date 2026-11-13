@@ -89,6 +89,43 @@ def _within_budget(queries: list, summary: dict) -> list:
     return chosen
 
 
+# Sources whose searches run in a fixed order with no built-in
+# rotation (Adzuna rotates by call usage in _within_budget, JSearch by
+# monthly usage): when the 4-minute budget cut a run short, the SAME
+# tail searches were skipped every run and effectively never fetched
+# at all (Nov 12 2026: SmartRecruiters left 11 searches on three
+# straight runs). These sources rotate their starting search each
+# run, persisted in the main database, so across successive runs
+# every search gets its turn.
+ROTATE_SOURCES = {"dice", "monster", "smartrecruiters", "phenom"}
+
+
+def _apply_rotation(name: str, run_queries: list) -> tuple[list, int]:
+    """Rotate a source's searches to where its last run stopped.
+    Returns (possibly rotated list, offset used)."""
+    if name not in ROTATE_SOURCES or len(run_queries) < 2:
+        return run_queries, 0
+    try:
+        off = int(db.get_setting(f"rotate_offset_{name}") or 0)
+    except ValueError:
+        off = 0
+    off %= len(run_queries)
+    if off == 0:
+        return run_queries, 0
+    return run_queries[off:] + run_queries[:off], off
+
+
+def _advance_rotation(name: str, off: int, attempted: int,
+                      total: int) -> None:
+    """Persist where the next run of this source should start: just
+    past the last search this run completed. A run that finished
+    every search leaves the offset where it was."""
+    if name not in ROTATE_SOURCES or total < 2:
+        return
+    db.set_setting(f"rotate_offset_{name}",
+                   str((off + attempted) % total))
+
+
 def _merge(queries: list, more: list) -> None:
     seen = {((q.get("title") or "").lower(), (q.get("location") or "").lower())
             for q in queries}
@@ -256,6 +293,9 @@ def _run() -> dict:
         elif name == "monster" and not mod.due(settings):
             st["status"] = f"waiting (Monster runs every {mod.every_hours(settings)} h to keep the cost low)"
         else:
+            rot_off = 0
+            rot_total = 0
+            attempted = 0
             try:
                 fetched = 0
                 new = 0
@@ -273,6 +313,8 @@ def _run() -> dict:
                     run_queries = rotated[:room]
                     if len(run_queries) < len(queries):
                         summary["budget_skipped"]["jsearch"] = len(queries) - len(run_queries)
+                run_queries, rot_off = _apply_rotation(name, run_queries)
+                rot_total = len(run_queries)
                 for qi, q in enumerate(run_queries):
                     if (datetime.now(timezone.utc) - t_start).total_seconds() \
                             >= SOURCE_BUDGET_SECONDS:
@@ -292,12 +334,14 @@ def _run() -> dict:
                             # insert_job would only re-confirm the dup
                         if _save_job(job):
                             new += 1
+                    attempted = qi + 1
                 if name == "monster" and not cut_short:   # only a run that WORKED starts the 12-hour wait
                     db.set_setting("monster_last_run_at", datetime.now(timezone.utc).isoformat())
                 if cut_short:
                     st.update(status=(f"partial: stopped at the "
                                       f"{SOURCE_BUDGET_SECONDS // 60}-minute source "
-                                      f"budget ({cut_short} searches left)"),
+                                      f"budget ({cut_short} searches left"
+                                      f"{' — they lead the next run' if name in ROTATE_SOURCES else ''})"),
                               jobs=fetched, new=new)
                 else:
                     st.update(status="ok", jobs=fetched, new=new)
@@ -307,6 +351,10 @@ def _run() -> dict:
                 from app.sources.common import safe_error
                 st["status"] = f"error: {safe_error(e)}"
                 summary["errors"].append(f"{name}: {safe_error(e)}")
+            # rotation bookkeeping runs on both paths: next run starts
+            # just past the last search this run completed (on an
+            # error, the failed search itself leads the next run)
+            _advance_rotation(name, rot_off, attempted, rot_total)
         summary["sources"][name] = st
         if st["status"].startswith("waiting"):
             continue   # keep the last REAL run visible in Settings (e.g. Monster's result)
