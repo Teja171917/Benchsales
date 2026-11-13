@@ -8,7 +8,7 @@ import json
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app import autolearn, db, usa
 from app import matcher
@@ -126,6 +126,24 @@ def _advance_rotation(name: str, off: int, attempted: int,
                    str((off + attempted) % total))
 
 
+def _max_age_days(settings: dict) -> int:
+    """How many days back to pull postings (setting max_job_age_days,
+    default 14 — Teja's rule Nov 13 2026: nothing older than two
+    weeks). 0 or negative turns the age limit off; garbage falls back
+    to the default rather than breaking a run."""
+    try:
+        return int(settings.get("max_job_age_days") or 14)
+    except (TypeError, ValueError):
+        return 14
+
+
+def _too_old(job: dict, cutoff) -> bool:
+    """True only when the posting's date is KNOWN and older than the
+    cutoff. Blank/unparseable dates are kept — age can't be proven."""
+    posted = matcher._parse_date(job.get("posted_at"))
+    return posted is not None and posted < cutoff
+
+
 def _merge(queries: list, more: list) -> None:
     seen = {((q.get("title") or "").lower(), (q.get("location") or "").lower())
             for q in queries}
@@ -172,12 +190,31 @@ def _prepare_all(deadline: float | None = None) -> tuple[list, dict]:
                         "prepare phase budget")
                 except Exception as e:  # noqa: BLE001 - never block collection
                     purged = {"jobs": 0, "matches": 0, "error": str(e)}
+            # age sweep (Nov 13 2026): same self-cleaning pattern for
+            # postings older than this workspace's window (default
+            # 14 days) — the pool must not keep what the door now
+            # refuses. Undated jobs are kept (age unprovable).
+            purged_old = {"jobs": 0, "matches": 0}
+            _age = _max_age_days(db.get_settings())
+            if _age > 0:
+                try:
+                    if deadline is not None:
+                        matcher.check_deadline(deadline)
+                    purged_old = db.purge_old_jobs(_age)
+                except matcher.PhaseTimeout:
+                    maintained["partial"] = (
+                        "stopped at the "
+                        f"{PHASE_BUDGET_SECONDS['prepare'] // 60}-minute "
+                        "prepare phase budget")
+                except Exception as e:  # noqa: BLE001 - never block collection
+                    purged_old = {"jobs": 0, "matches": 0, "error": str(e)}
             own = autolearn.queries_for_run(db.get_settings())
             has_people = bool(db.consultants_with_resumes())
         per_db[str(path)] = {"queries": own if has_people else [],
                              "learned_skills": maintained.get("learned", []),
                              "rescored": maintained.get("rescored", 0),
                              "purged_non_us": purged,
+                             "purged_old": purged_old,
                              "matches_new": 0}
         if maintained.get("partial"):
             per_db[str(path)]["maintain_partial"] = maintained["partial"]
@@ -245,6 +282,11 @@ def _run() -> dict:
                           "phase budget in at least one workspace")
     _end_phase(phases, "prepare", t, prepare_status)
     settings = db.get_settings()
+    # fetch-door age limit (stored pool is swept per workspace in
+    # prepare): drop postings known to be older than the window
+    _age_days = _max_age_days(settings)
+    age_cutoff = (datetime.now(timezone.utc) - timedelta(days=_age_days)
+                  if _age_days > 0 else None)
     main_part = per_db.get(str(db.DB_PATH), {})
     try:
         enabled_sources = set(json.loads(settings.get("enabled_sources") or "[]"))
@@ -327,6 +369,9 @@ def _run() -> dict:
                     batch = mod.fetch(q, settings)
                     if usa_only:
                         batch = usa.filter_us(batch)
+                    if age_cutoff is not None:
+                        batch = [j for j in batch
+                                 if not _too_old(j, age_cutoff)]
                     for job in batch:
                         fetched += 1
                         if _seen_before(seen_jobs, job):

@@ -1315,6 +1315,8 @@ async function renderSettings() {
     </div>
     <div class="card"><h3>USA market</h3>
       <label class="toggle"><input type="checkbox" id="s-usa"${s.usa_only === "0" ? "" : " checked"}> USA jobs only (drop postings that clearly name a non-US location; blank / "Remote" are kept)</label>
+      <div style="margin-top:10px"><label>Only pull postings from the last <input type="number" id="s-maxage" min="0" max="90" style="width:64px" value="${esc(s.max_job_age_days || "14")}"> days</label>
+        <div class="muted" style="margin-top:6px">Older postings are refused at fetch and swept from the pool on every run. Postings with no readable date are kept. Set 0 for no age limit.</div></div>
       <div style="margin-top:10px"><b>Employment types to collect</b>
         <div class="chiprow" id="s-emp" style="margin-top:6px">${empChips((s.collect_emp_types || "fulltime,c2c,w2").split(",").filter(Boolean), "data-semp")}</div>
         <div class="muted" style="margin-top:6px">Steers the Adzuna and JSearch queries (C2C, W2 and 1099 roles are all requested as "contractor" from JSearch). Everything fetched is still tagged, so you can narrow further on the Jobs tab.</div></div>
@@ -1479,6 +1481,7 @@ async function renderSettings() {
       match_threshold: $("#s-thr").value,
       collect_interval_minutes: $("#s-interval").value,
       usa_only: $("#s-usa").checked ? "1" : "0",
+      max_job_age_days: (() => { const v = parseInt($("#s-maxage").value, 10); return String(isNaN(v) ? 14 : Math.max(0, Math.min(90, v))); })(),
       auto_queries: $("#s-autoq").checked ? "1" : "0",
       auto_learn_skills: $("#s-autolearn").checked ? "1" : "0",
       max_queries: String(Math.max(1, Math.min(12, parseInt($("#s-maxq").value, 10) || 8))),

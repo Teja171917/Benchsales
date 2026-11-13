@@ -848,6 +848,64 @@ def purge_non_us_jobs(batch: int = 50) -> dict:
     return {"jobs": removed_jobs, "matches": removed_matches}
 
 
+def _posted_date(s) -> datetime | None:
+    """Parse a stored posted_at into an aware datetime. Mirrors
+    matcher._parse_date (ISO only) — db cannot import matcher (cycle),
+    so keep the two in sync. Unparseable or blank returns None."""
+    if not s:
+        return None
+    try:
+        d = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d
+    except Exception:
+        return None
+
+
+def purge_old_jobs(days: int, batch: int = 50) -> dict:
+    """Delete stored jobs posted more than `days` ago, on the CURRENT
+    database (the collector calls it per workspace during prepare).
+    Teja's rule Nov 13 2026: only the last two weeks of postings —
+    anything older is noise. Jobs with a blank or unparseable
+    posted_at are KEPT: their age can't be proven (manual URL imports
+    carry no date at all).
+
+    Deleting a job cascades to its matches, queue entries, tailored
+    resumes and cover letters (foreign_keys pragma is on) — the same
+    trade the non-US sweep makes. Commits in small batches.
+    Returns {"jobs": n, "matches": m} actually removed."""
+    if days <= 0:
+        return {"jobs": 0, "matches": 0}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    with get_conn() as conn:
+        rows = conn.execute("SELECT id, posted_at FROM jobs").fetchall()
+    doomed = []
+    for r in rows:
+        posted = _posted_date(r["posted_at"])
+        if posted is not None and posted < cutoff:
+            doomed.append(r["id"])
+    removed_jobs = removed_matches = 0
+    for i in range(0, len(doomed), batch):
+        chunk = doomed[i:i + batch]
+        marks = ",".join("?" * len(chunk))
+        with get_conn() as conn:
+            removed_matches += conn.execute(
+                f"SELECT COUNT(*) FROM matches WHERE job_id IN ({marks})",
+                chunk).fetchone()[0]
+            conn.execute(f"DELETE FROM jobs WHERE id IN ({marks})", chunk)
+        removed_jobs += len(chunk)
+    if removed_jobs:
+        log_activity(
+            "collect",
+            f"Purged {removed_jobs} jobs older than {days} days "
+            f"({removed_matches} matches removed)",
+            actor="system",
+            detail="Stored-pool sweep: only postings from the last "
+                   f"{days} days are kept.")
+    return {"jobs": removed_jobs, "matches": removed_matches}
+
+
 def backfill_auth_tags(batch: int = 500) -> int:
     """Classify jobs whose auth_tag is still NULL (pre-feature rows).
     Returns how many were filled; '' means the posting states nothing.
