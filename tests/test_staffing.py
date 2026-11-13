@@ -32,7 +32,9 @@ class StaffingFirmsTests(unittest.TestCase):
         firms = sr.firms()
         # 202 from Teja's CSV + 22 verified additions Nov 7 2026
         # (6 SmartRecruiters feeds + 16 directory, incl. Innova)
-        self.assertEqual(len(firms), 224)
+        # + 12 verified SmartRecruiters feeds Nov 13 2026
+        # (TestingXperts, Stefanini, SGS Consulting, Aequor, ...)
+        self.assertEqual(len(firms), 236)
         live = sr.sr_firms()
         self.assertGreaterEqual(len(live), 15)
         for f in live:

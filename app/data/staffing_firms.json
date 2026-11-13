@@ -1790,5 +1790,101 @@
   "identifier": "",
   "verified": true,
   "notes": "careers page loads, ATS unknown"
+ },
+ {
+  "company": "TestingXperts",
+  "careers_url": "https://careers.smartrecruiters.com/TestingXperts",
+  "ats": "SmartRecruiters",
+  "identifier": "TestingXperts",
+  "verified": true,
+  "notes": "QA/testing services firm with large US contract board"
+ },
+ {
+  "company": "Stefanini",
+  "careers_url": "https://careers.smartrecruiters.com/Stefanini1",
+  "ats": "SmartRecruiters",
+  "identifier": "Stefanini1",
+  "verified": true,
+  "notes": "Stefanini North America IT staffing arm; US contract roles"
+ },
+ {
+  "company": "SGS Consulting",
+  "careers_url": "https://careers.smartrecruiters.com/SGSConsulting",
+  "ats": "SmartRecruiters",
+  "identifier": "SGSConsulting",
+  "verified": true,
+  "notes": "US staffing firm; mix of IT, engineering and light-industrial roles"
+ },
+ {
+  "company": "Aequor",
+  "careers_url": "https://careers.smartrecruiters.com/Aequor",
+  "ats": "SmartRecruiters",
+  "identifier": "Aequor",
+  "verified": true,
+  "notes": "Aequor Technologies; IT/life-sciences staffing"
+ },
+ {
+  "company": "Kellton Tech",
+  "careers_url": "https://careers.smartrecruiters.com/KelltonTech",
+  "ats": "SmartRecruiters",
+  "identifier": "KelltonTech",
+  "verified": true,
+  "notes": "Postings are W2 contract staffing roles"
+ },
+ {
+  "company": "Fulcrum Digital",
+  "careers_url": "https://careers.smartrecruiters.com/FulcrumDigital",
+  "ats": "SmartRecruiters",
+  "identifier": "FulcrumDigital",
+  "verified": true,
+  "notes": "Digital engineering / IT services"
+ },
+ {
+  "company": "Emonics LLC",
+  "careers_url": "https://careers.smartrecruiters.com/EmonicsLLC",
+  "ats": "SmartRecruiters",
+  "identifier": "EmonicsLLC",
+  "verified": true,
+  "notes": "IT staffing firm"
+ },
+ {
+  "company": "ALOIS Healthcare",
+  "careers_url": "https://careers.smartrecruiters.com/AloisHealthcare",
+  "ats": "SmartRecruiters",
+  "identifier": "AloisHealthcare",
+  "verified": true,
+  "notes": "Healthcare staffing firm; board small at check time"
+ },
+ {
+  "company": "BCforward",
+  "careers_url": "https://careers.smartrecruiters.com/BCforward",
+  "ats": "SmartRecruiters",
+  "identifier": "BCforward",
+  "verified": true,
+  "notes": "Large IT staffing firm; board nearly empty at check time (1 live posting)"
+ },
+ {
+  "company": "Qualitest",
+  "careers_url": "https://careers.smartrecruiters.com/QualitestGroup",
+  "ats": "SmartRecruiters",
+  "identifier": "QualitestGroup",
+  "verified": true,
+  "notes": "QA/testing services giant; board nearly empty at check time (1 live posting)"
+ },
+ {
+  "company": "Camden Kelly",
+  "careers_url": "https://careers.smartrecruiters.com/CamdenKelly",
+  "ats": "SmartRecruiters",
+  "identifier": "CamdenKelly",
+  "verified": true,
+  "notes": "Dallas IT staffing firm; board nearly empty at check time (1 live posting)"
+ },
+ {
+  "company": "Advantis Global",
+  "careers_url": "https://careers.smartrecruiters.com/AdvantisGlobal",
+  "ats": "SmartRecruiters",
+  "identifier": "AdvantisGlobal",
+  "verified": true,
+  "notes": "IT staffing firm; only an internal recruiter role live at check time"
  }
 ]
