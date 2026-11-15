@@ -19,6 +19,7 @@ Each company has its own database file (see db.companies()); each one is
 backed up as its own object (`benchpilot/company_<name>.db`).
 """
 import os
+import shutil
 import sqlite3
 import tempfile
 import threading
@@ -36,6 +37,24 @@ _state = {"enabled": False, "reason": "not started", "last_backup_at": None,
 _store = None
 _lock = threading.Lock()
 _last_sig = {}   # database path -> (mtime, size) at its last backup
+
+
+def _discard(tmp_file) -> None:
+    """Delete a temp snapshot/restore file AND the mkdtemp folder holding it.
+
+    tempfile.mkdtemp() folders were previously never removed: backup() runs
+    every 20 seconds per database, so undeleted snapshots accumulated without
+    bound until the host saturated and every page returned 500 (Nov 13-14
+    outages). Never raises."""
+    try:
+        p = Path(tmp_file)
+        try:
+            p.unlink()
+        except OSError:
+            pass
+        shutil.rmtree(p.parent, ignore_errors=True)
+    except Exception:
+        pass
 
 
 def object_for(path) -> str:
@@ -137,11 +156,17 @@ def restore(store=None, path=None) -> bool:
                 except OSError:
                     pass
             os.replace(tmp, local_path)
+            _discard(tmp)   # file was moved; removes the now-empty temp folder
             _state.update(restored=True)
             _last_sig[str(local_path)] = _sig(local_path)
             return True
+        _discard(tmp)
         return False
     except Exception as e:
+        try:
+            _discard(tmp)
+        except Exception:
+            pass
         _state.update(last_error=f"restore failed: {e.__class__.__name__}: {str(e)[:120]}")
         return False
 
@@ -178,16 +203,20 @@ def backup(store=None, force: bool = False, path=None) -> bool:
             with db.use(path):
                 db.set_setting("backup_stamp", datetime.now(timezone.utc).isoformat())
             snap = Path(tempfile.mkdtemp()) / "snapshot.db"
-            src = sqlite3.connect(path)
-            dst = sqlite3.connect(snap)
             try:
-                src.backup(dst)
+                src = sqlite3.connect(path)
+                dst = sqlite3.connect(snap)
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
+                    src.close()
+                store.put(object_for(path), snap)
+                snap_size = snap.stat().st_size
             finally:
-                dst.close()
-                src.close()
-            store.put(object_for(path), snap)
+                _discard(snap)   # the leak fix: never leave the snapshot behind
             _state.update(last_backup_at=datetime.now(timezone.utc).isoformat(),
-                          last_error="", size=snap.stat().st_size)
+                          last_error="", size=snap_size)
             _last_sig[str(path)] = _sig(path)   # after our own stamp write
             return True
         except Exception as e:
